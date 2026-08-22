@@ -16,7 +16,7 @@ compile_error!("seq-session: backend-live and backend-test use different struct 
 use seq_backend_eql::{backend::EqlBackend, LootTracker, SelfTracker};
 #[cfg(any(feature = "backend-live", feature = "backend-test"))]
 use seq_backend_live::LiveBackend;
-use seq_events::{Backend, Decoded};
+use seq_events::{Backend, Decoded, SessionResetReason};
 use std::sync::Arc;
 
 #[cfg(feature = "backend-eql")]
@@ -41,7 +41,7 @@ pub enum DecodeDisposition {
     Unmapped,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct DecodeBatch {
     pub protocol_generation: ProtocolGeneration,
     pub disposition: DecodeDisposition,
@@ -70,6 +70,28 @@ enum BackendSession {
     Test(LiveBackend),
     #[cfg(feature = "backend-eql")]
     Eql(Box<EqlSession>),
+}
+
+impl BackendSession {
+    fn observe_event(
+        &mut self,
+        event: &Event,
+        opcode_name: &str,
+        direction: Direction,
+        payload: &[u8],
+        timestamp: i64,
+    ) {
+        match self {
+            #[cfg(feature = "backend-eql")]
+            Self::Eql(state) => {
+                state.observe_event(event, opcode_name, direction, payload, timestamp);
+            }
+            #[cfg(any(feature = "backend-live", feature = "backend-test"))]
+            Self::Live(_) | Self::Test(_) => {
+                let _ = (event, opcode_name, direction, payload, timestamp);
+            }
+        }
+    }
 }
 
 #[cfg(feature = "backend-eql")]
@@ -164,31 +186,29 @@ impl Session {
                 backend.decode(opcode_name, direction, payload)
             }
             #[cfg(feature = "backend-eql")]
-            BackendSession::Eql(state) => {
-                let decoded = state.decoder.decode(opcode_name, direction, payload);
-                state.observe(&decoded, opcode_name, direction, payload, _timestamp);
-                decoded
-            }
+            BackendSession::Eql(state) => state.decoder.decode(opcode_name, direction, payload),
         };
+        let decoded =
+            self.apply_session_semantics(decoded, opcode_name, direction, payload, _timestamp);
         batch(generation, decoded)
     }
 
     /// Close stateful correlators at a lifecycle boundary.
     ///
-    /// Phase 2 still emits the existing low-level `Event` variants, so EQL loot
-    /// rows are drained separately with `take_loot_rows` during shadow parity.
-    pub fn flush(&mut self, _reason: FlushReason) -> Vec<Event> {
-        match &mut self.decoder {
-            #[cfg(feature = "backend-eql")]
-            BackendSession::Eql(state) => {
-                state.loot_rows.extend(state.loot_tracker.flush());
-                state.loot_tracker.reset();
-                state.self_tracker.reset();
-            }
-            #[cfg(any(feature = "backend-live", feature = "backend-test"))]
-            BackendSession::Live(_) | BackendSession::Test(_) => {}
+    /// EQL loot rows remain a separate shadow output until the loot-family
+    /// migration. Zone-transition and explicit resets emit a reset marker;
+    /// terminal flushes only close correlators.
+    pub fn flush(&mut self, reason: FlushReason) -> Vec<Event> {
+        self.reset_correlations();
+        match reason {
+            FlushReason::ZoneTransition => vec![Event::SessionReset {
+                reason: SessionResetReason::ZoneTransition,
+            }],
+            FlushReason::Reset => vec![Event::SessionReset {
+                reason: SessionResetReason::Explicit,
+            }],
+            FlushReason::Shutdown | FlushReason::ReplayEnd => Vec::new(),
         }
-        Vec::new()
     }
 
     /// Current EQL self-correlation state. Non-EQL sessions return zeros.
@@ -226,31 +246,60 @@ impl Session {
             BackendSession::Live(_) | BackendSession::Test(_) => Vec::new(),
         }
     }
-}
 
-#[cfg(feature = "backend-eql")]
-impl EqlSession {
-    fn observe(
+    fn apply_session_semantics(
         &mut self,
-        decoded: &Decoded,
+        decoded: Decoded,
         opcode_name: &str,
         direction: Direction,
         payload: &[u8],
         timestamp: i64,
-    ) {
-        match decoded {
-            Decoded::One(event) => {
-                self.observe_event(event, opcode_name, direction, payload, timestamp)
+    ) -> Decoded {
+        let events = match decoded {
+            Decoded::One(event) => vec![event],
+            Decoded::Many(events) => events,
+            other => return other,
+        };
+
+        let mut output = Vec::with_capacity(events.len() + 1);
+        for event in events {
+            let reset = match &event {
+                Event::EnterWorld { .. } => Some(SessionResetReason::EnterWorld),
+                Event::PlayerProfile(_) => Some(SessionResetReason::PlayerProfile),
+                Event::ZoneTransition {
+                    confirmed: true, ..
+                } => Some(SessionResetReason::ZoneTransition),
+                _ => None,
+            };
+            if let Some(reason) = reset {
+                self.reset_correlations();
+                output.push(Event::SessionReset { reason });
             }
-            Decoded::Many(events) => {
-                for event in events {
-                    self.observe_event(event, opcode_name, direction, payload, timestamp);
-                }
-            }
-            Decoded::Ignored | Decoded::Unhandled | Decoded::Malformed => {}
+
+            self.decoder
+                .observe_event(&event, opcode_name, direction, payload, timestamp);
+            output.push(event);
         }
+        Decoded::Many(output)
     }
 
+    fn reset_correlations(&mut self) {
+        match &mut self.decoder {
+            #[cfg(feature = "backend-eql")]
+            BackendSession::Eql(state) => {
+                state.loot_rows.extend(state.loot_tracker.flush());
+                state.loot_tracker.reset();
+                state.self_tracker.reset();
+                state.self_stats.clear();
+            }
+            #[cfg(any(feature = "backend-live", feature = "backend-test"))]
+            BackendSession::Live(_) | BackendSession::Test(_) => {}
+        }
+    }
+}
+
+#[cfg(feature = "backend-eql")]
+impl EqlSession {
     fn observe_event(
         &mut self,
         event: &Event,
@@ -261,7 +310,6 @@ impl EqlSession {
     ) {
         match event {
             Event::PlayerProfile(profile) => {
-                self.self_tracker.reset();
                 self.player_name.clone_from(&profile.name);
                 self.loot_tracker.set_looter(&profile.name);
             }
@@ -365,10 +413,9 @@ impl EqlSession {
                     ));
                 }
             }
-            Event::EnterWorld if direction == Dir::ClientToServer => {
-                self.loot_rows.extend(self.loot_tracker.flush());
-                self.loot_tracker.reset();
-                self.self_tracker.reset();
+            Event::EnterWorld { character_name } if direction == Dir::ClientToServer => {
+                self.player_name.clone_from(character_name);
+                self.loot_tracker.set_looter(character_name);
             }
             _ => {}
         }
@@ -404,6 +451,55 @@ mod tests {
     fn self_pos(spawn_id: u16) -> [u8; seq_backend_eql::player_self_pos::PAYLOAD_LEN] {
         let mut payload = [0; seq_backend_eql::player_self_pos::PAYLOAD_LEN];
         payload[2..4].copy_from_slice(&spawn_id.to_le_bytes());
+        payload
+    }
+
+    fn enter_world(name: &str) -> [u8; 72] {
+        let mut payload = [0; 72];
+        payload[..name.len()].copy_from_slice(name.as_bytes());
+        payload
+    }
+
+    fn profile(name: &str) -> seq_events::ProfileInfo {
+        seq_events::ProfileInfo {
+            name: name.into(),
+            last_name: String::new(),
+            class_: 1,
+            level: 2,
+            race: 3,
+            deity: 4,
+            cur_hp: 5,
+            mana: 6,
+            aa_ids: Vec::new(),
+            aa_values: Vec::new(),
+            aa_spent: 0,
+            skills: Vec::new(),
+            class_mask: 0,
+            str_: 0,
+            sta: 0,
+            cha: 0,
+            dex: 0,
+            int_: 0,
+            agi: 0,
+            wis: 0,
+            platinum: 0,
+            gold: 0,
+            silver: 0,
+            copper: 0,
+        }
+    }
+
+    fn new_zone() -> Vec<u8> {
+        let mut payload = Vec::new();
+        payload.extend_from_slice(b"qeynos\0South Qeynos\0");
+        payload.extend_from_slice(&[0; 2]);
+        payload.extend_from_slice(b"qeynos.eqg\0");
+        payload.extend_from_slice(&[0; 90]);
+        payload.extend_from_slice(&1.25f32.to_le_bytes());
+        payload.extend_from_slice(&[0; 28]);
+        payload.extend_from_slice(&20.5f32.to_le_bytes());
+        payload.extend_from_slice(&10.25f32.to_le_bytes());
+        payload.extend_from_slice(&30.75f32.to_le_bytes());
         payload
     }
 
@@ -448,7 +544,141 @@ mod tests {
             StreamKind::World,
             OpcodeId(0x0935),
             Dir::ClientToServer,
+            &enter_world("Firona"),
+        );
+        assert_eq!(session.self_identity(), SelfIdentity::default());
+    }
+
+    #[test]
+    fn enter_world_resets_before_the_identity_event_and_malformed_does_not_reset() {
+        let registry = Arc::new(ProtocolRegistry::embedded().unwrap());
+        let mut session = eql_session(registry);
+        session.decode(
+            StreamKind::Zone,
+            OpcodeId(0x6987),
+            Dir::ClientToServer,
+            &self_pos(77),
+        );
+
+        let malformed = session.decode(
+            StreamKind::World,
+            OpcodeId(0x0935),
+            Dir::ClientToServer,
             &[],
+        );
+        assert_eq!(malformed.disposition, DecodeDisposition::Malformed);
+        assert_eq!(session.self_identity().provisional_id, 77);
+
+        let entered = session.decode(
+            StreamKind::World,
+            OpcodeId(0x0935),
+            Dir::ClientToServer,
+            &enter_world("Firona"),
+        );
+        assert_eq!(
+            entered.events,
+            vec![
+                Event::SessionReset {
+                    reason: SessionResetReason::EnterWorld,
+                },
+                Event::EnterWorld {
+                    character_name: "Firona".into(),
+                },
+            ]
+        );
+        assert_eq!(session.self_identity(), SelfIdentity::default());
+    }
+
+    #[test]
+    fn profile_reset_precedes_profile_observation() {
+        let registry = Arc::new(ProtocolRegistry::embedded().unwrap());
+        let mut session = eql_session(registry);
+        session.decode(
+            StreamKind::Zone,
+            OpcodeId(0x6987),
+            Dir::ClientToServer,
+            &self_pos(88),
+        );
+        let profile = profile("Firona");
+        let decoded = session.apply_session_semantics(
+            Decoded::One(Event::PlayerProfile(profile.clone())),
+            "OP_PlayerProfile",
+            Dir::ServerToClient,
+            &[],
+            0,
+        );
+        assert_eq!(
+            decoded,
+            Decoded::Many(vec![
+                Event::SessionReset {
+                    reason: SessionResetReason::PlayerProfile,
+                },
+                Event::PlayerProfile(profile),
+            ])
+        );
+        assert_eq!(session.self_identity(), SelfIdentity::default());
+    }
+
+    #[test]
+    fn new_zone_emits_identity_then_environment_in_wire_order() {
+        let registry = Arc::new(ProtocolRegistry::embedded().unwrap());
+        let mut session = eql_session(registry);
+        let decoded = session.decode(
+            StreamKind::Zone,
+            OpcodeId(0x15e1),
+            Dir::ServerToClient,
+            &new_zone(),
+        );
+        assert_eq!(
+            decoded.events,
+            vec![
+                Event::ZoneChanged(seq_events::ZoneInfo {
+                    short_name: "qeynos".into(),
+                    long_name: "South Qeynos".into(),
+                }),
+                Event::ZoneEnvironmentChanged(seq_events::ZoneEnvironment {
+                    zone_file: "qeynos.eqg".into(),
+                    experience_multiplier: 1.25,
+                    safe_x: 10.25,
+                    safe_y: 20.5,
+                    safe_z: 30.75,
+                }),
+            ]
+        );
+    }
+
+    #[test]
+    fn eql_transition_request_does_not_reset_until_a_real_boundary() {
+        let registry = Arc::new(ProtocolRegistry::embedded().unwrap());
+        let mut session = eql_session(registry);
+        session.decode(
+            StreamKind::Zone,
+            OpcodeId(0x6987),
+            Dir::ClientToServer,
+            &self_pos(99),
+        );
+        let decoded = session.decode(
+            StreamKind::Zone,
+            OpcodeId(0x2960),
+            Dir::ClientToServer,
+            &[0; 484],
+        );
+        assert_eq!(
+            decoded.events,
+            vec![Event::ZoneTransition {
+                character_name: String::new(),
+                zone_id: None,
+                instance_id: None,
+                confirmed: false,
+            }]
+        );
+        assert_eq!(session.self_identity().provisional_id, 99);
+
+        assert_eq!(
+            session.flush(FlushReason::ZoneTransition),
+            vec![Event::SessionReset {
+                reason: SessionResetReason::ZoneTransition,
+            }]
         );
         assert_eq!(session.self_identity(), SelfIdentity::default());
     }

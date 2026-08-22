@@ -91,6 +91,7 @@ pub mod time_of_day;
 pub mod wear_change;
 pub mod zone_change;
 pub mod zone_point;
+pub mod zone_server_info;
 
 pub use action::{parse_action, Action, ActionError};
 pub use action2::{parse_action2, Action2, Action2Error};
@@ -137,6 +138,7 @@ pub use start_cast::{parse_start_cast, StartCast, StartCastError};
 pub use wear_change::{parse_wear_change, WearChange, WearChangeError};
 pub use zone_change::{parse_zone_change, ZoneChange, ZoneChangeError};
 pub use zone_point::{parse_zone_point, ZonePoint, ZonePointError};
+pub use zone_server_info::{parse_zone_server_info, ZoneServerInfo, ZoneServerInfoError};
 
 /// Decode a NUL-padded byte buffer (a wire-format C-string field) into
 /// an owned `String`. Bytes after the first NUL are dropped; invalid

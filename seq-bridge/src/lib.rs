@@ -815,6 +815,12 @@ mod ffi {
         ReplayEnd = 2,
         Reset = 3,
     }
+    enum EventSessionResetReason {
+        EnterWorld = 0,
+        PlayerProfile = 1,
+        ZoneTransition = 2,
+        Explicit = 3,
+    }
     enum SessionDisposition {
         Decoded = 0,
         Ignored = 1,
@@ -872,6 +878,9 @@ mod ffi {
         GroupDisband = 46,
         LevelUpdate = 47,
         EnterWorld = 48,
+        SessionReset = 49,
+        ZoneTransition = 50,
+        ZoneEnvironmentChanged = 51,
     }
 
     struct SessionEventRef {
@@ -1037,6 +1046,27 @@ mod ffi {
         short_name: String,
         long_name: String,
     }
+    struct EventSessionReset {
+        reason: EventSessionResetReason,
+    }
+    struct EventZoneTransition {
+        character_name: String,
+        has_zone_id: bool,
+        zone_id: u32,
+        has_instance_id: bool,
+        instance_id: u32,
+        confirmed: bool,
+    }
+    struct EventZoneEnvironment {
+        zone_file: String,
+        experience_multiplier: f32,
+        safe_x: f32,
+        safe_y: f32,
+        safe_z: f32,
+    }
+    struct EventEnterWorld {
+        character_name: String,
+    }
     struct EventNamed {
         name: String,
     }
@@ -1201,6 +1231,9 @@ mod ffi {
         guilds_in_zone: Vec<EventGuildsInZone>,
         time_of_day: Vec<EventTimeOfDay>,
         zone_changed: Vec<EventZoneInfo>,
+        session_reset: Vec<EventSessionReset>,
+        zone_transition: Vec<EventZoneTransition>,
+        zone_environment_changed: Vec<EventZoneEnvironment>,
         player_profile: Vec<EventProfileInfo>,
         named: Vec<EventNamed>,
         inspect_answer: Vec<EventInspectAnswer>,
@@ -1235,6 +1268,7 @@ mod ffi {
         group_follow: Vec<EventGroupFollowPayload>,
         group_disband: Vec<EventGroupDisbandPayload>,
         level_update: Vec<EventLevelUpdatePayload>,
+        enter_world: Vec<EventEnterWorld>,
         self_stats: Vec<SelfStat>,
         loot_rows: Vec<LootRow>,
     }
@@ -1578,6 +1612,21 @@ fn session_disposition(disposition: seq_session::DecodeDisposition) -> ffi::Sess
     }
 }
 
+fn event_session_reset_reason(
+    reason: seq_events::SessionResetReason,
+) -> ffi::EventSessionResetReason {
+    match reason {
+        seq_events::SessionResetReason::EnterWorld => ffi::EventSessionResetReason::EnterWorld,
+        seq_events::SessionResetReason::PlayerProfile => {
+            ffi::EventSessionResetReason::PlayerProfile
+        }
+        seq_events::SessionResetReason::ZoneTransition => {
+            ffi::EventSessionResetReason::ZoneTransition
+        }
+        seq_events::SessionResetReason::Explicit => ffi::EventSessionResetReason::Explicit,
+    }
+}
+
 fn event_pos(pos: seq_events::Pos) -> ffi::EventPos {
     ffi::EventPos {
         x: pos.x,
@@ -1753,6 +1802,13 @@ fn translate_events(
 fn translate_event(batch: &mut ffi::SessionDecodeBatch, event: seq_events::Event) {
     use seq_events::Event;
     match event {
+        Event::SessionReset { reason } => {
+            let index = batch.session_reset.len();
+            batch.session_reset.push(ffi::EventSessionReset {
+                reason: event_session_reset_reason(reason),
+            });
+            push_ref(batch, ffi::SessionEventKind::SessionReset, index);
+        }
         Event::SpawnAdded(spawn) => {
             let index = batch.spawn_added.len();
             batch.spawn_added.push(event_spawn_info(spawn));
@@ -1872,6 +1928,23 @@ fn translate_event(batch: &mut ffi::SessionDecodeBatch, event: seq_events::Event
             });
             push_ref(batch, ffi::SessionEventKind::TimeOfDay, index);
         }
+        Event::ZoneTransition {
+            character_name,
+            zone_id,
+            instance_id,
+            confirmed,
+        } => {
+            let index = batch.zone_transition.len();
+            batch.zone_transition.push(ffi::EventZoneTransition {
+                character_name,
+                has_zone_id: zone_id.is_some(),
+                zone_id: zone_id.unwrap_or_default(),
+                has_instance_id: instance_id.is_some(),
+                instance_id: instance_id.unwrap_or_default(),
+                confirmed,
+            });
+            push_ref(batch, ffi::SessionEventKind::ZoneTransition, index);
+        }
         Event::ZoneChanged(zone) => {
             let index = batch.zone_changed.len();
             batch.zone_changed.push(ffi::EventZoneInfo {
@@ -1879,6 +1952,19 @@ fn translate_event(batch: &mut ffi::SessionDecodeBatch, event: seq_events::Event
                 long_name: zone.long_name,
             });
             push_ref(batch, ffi::SessionEventKind::ZoneChanged, index);
+        }
+        Event::ZoneEnvironmentChanged(environment) => {
+            let index = batch.zone_environment_changed.len();
+            batch
+                .zone_environment_changed
+                .push(ffi::EventZoneEnvironment {
+                    zone_file: environment.zone_file,
+                    experience_multiplier: environment.experience_multiplier,
+                    safe_x: environment.safe_x,
+                    safe_y: environment.safe_y,
+                    safe_z: environment.safe_z,
+                });
+            push_ref(batch, ffi::SessionEventKind::ZoneEnvironmentChanged, index);
         }
         Event::PlayerProfile(profile) => {
             let index = batch.player_profile.len();
@@ -2234,8 +2320,12 @@ fn translate_event(batch: &mut ffi::SessionDecodeBatch, event: seq_events::Event
             });
             push_ref(batch, ffi::SessionEventKind::LevelUpdate, index);
         }
-        Event::EnterWorld => {
-            push_ref(batch, ffi::SessionEventKind::EnterWorld, 0);
+        Event::EnterWorld { character_name } => {
+            let index = batch.enter_world.len();
+            batch
+                .enter_world
+                .push(ffi::EventEnterWorld { character_name });
+            push_ref(batch, ffi::SessionEventKind::EnterWorld, index);
         }
     }
 }
@@ -2260,6 +2350,9 @@ fn empty_session_batch(
         guilds_in_zone: Vec::new(),
         time_of_day: Vec::new(),
         zone_changed: Vec::new(),
+        session_reset: Vec::new(),
+        zone_transition: Vec::new(),
+        zone_environment_changed: Vec::new(),
         player_profile: Vec::new(),
         named: Vec::new(),
         inspect_answer: Vec::new(),
@@ -2294,6 +2387,7 @@ fn empty_session_batch(
         group_follow: Vec::new(),
         group_disband: Vec::new(),
         level_update: Vec::new(),
+        enter_world: Vec::new(),
         self_stats: Vec::new(),
         loot_rows: Vec::new(),
     }

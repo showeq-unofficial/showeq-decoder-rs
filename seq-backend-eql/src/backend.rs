@@ -11,7 +11,7 @@
 
 use seq_events::{
     heading_deg, Backend, BuffEntry, Decoded, Dir, DoorInfo, Event, GuildRosterMember,
-    ItemTemplate, LootItemInfo, Pos, ProfileInfo, SpawnInfo, ZoneInfo,
+    ItemTemplate, LootItemInfo, Pos, ProfileInfo, SpawnInfo, ZoneEnvironment, ZoneInfo,
 };
 
 /// The EverQuest Legends backend (this crate's own parsers).
@@ -44,10 +44,14 @@ impl Backend for EqlBackend {
             "OP_DeleteSpawn" => delete_spawn(bytes),
             "OP_Death" => death(bytes),
             "OP_HPUpdate" => hp_update(bytes),
-            "OP_NewZone" => new_zone(bytes),
+            "OP_NewZone" if dir == Dir::ServerToClient => new_zone(bytes),
+            "OP_NewZone" => Decoded::Ignored,
             "OP_GuildsInZoneList" => guilds_in_zone_list(bytes),
             "OP_NewGuildInZone" => new_guild_in_zone(bytes),
-            "OP_PlayerProfile" => player_profile(bytes),
+            "OP_PlayerProfile" if dir == Dir::ServerToClient => player_profile(bytes),
+            "OP_PlayerProfile" => Decoded::Ignored,
+            "OP_ZoneChange" if dir == Dir::ClientToServer => zone_change(bytes),
+            "OP_ZoneChange" => Decoded::Ignored,
             "OP_LoadoutSwap" => loadout_swap(bytes),
             "OP_ClickObject" => click_object(dir, bytes),
             // eql's appearance event is the stock opcode carrying the WIDENED
@@ -56,12 +60,14 @@ impl Backend for EqlBackend {
             // the current patch; before this, 26530 packets a capture arrived
             // under a name with no arm and were dropped outright.
             "OP_SpawnAppearance" | "OP_SpawnAppearance2" => spawn_appearance2(bytes),
-            "OP_TimeOfDay" => time_of_day(bytes),
+            "OP_TimeOfDay" if dir == Dir::ServerToClient => time_of_day(bytes),
+            "OP_TimeOfDay" => Decoded::Ignored,
             "OP_Stance" => stance(bytes),
             "OP_Invocation" => invocation(bytes),
             "OP_GuildMemberList" => guild_roster(bytes),
             "OP_ItemPacket" => item_packet(bytes),
-            "OP_ZoneServerInfo" => zone_server_info(bytes),
+            "OP_ZoneServerInfo" if dir == Dir::ServerToClient => zone_server_info(bytes),
+            "OP_ZoneServerInfo" => Decoded::Ignored,
             "OP_GuildMOTD" => guild_motd(bytes),
             "OP_ExpandedGuildInfo" => expanded_guild_info(bytes),
             "OP_InspectAnswer" => inspect_answer(bytes),
@@ -94,7 +100,8 @@ impl Backend for EqlBackend {
             "OP_GroupDisband" | "OP_GroupDisband2" => group_disband(bytes),
             // OP_GroupUpdate is a fixed-168B status push (no roster); noop.
             "OP_GroupUpdate" => Decoded::Ignored,
-            "OP_EnterWorld" => Decoded::One(Event::EnterWorld),
+            "OP_EnterWorld" if dir == Dir::ClientToServer => enter_world(bytes),
+            "OP_EnterWorld" => Decoded::Ignored,
             _ => Decoded::Unhandled,
         }
     }
@@ -578,12 +585,51 @@ fn begin_cast(bytes: &[u8]) -> Decoded {
 
 fn new_zone(bytes: &[u8]) -> Decoded {
     match crate::parse_new_zone(bytes) {
-        Ok(z) => Decoded::One(Event::ZoneChanged(ZoneInfo {
-            short_name: z.short_name,
-            long_name: z.long_name,
-        })),
+        Ok(z) => Decoded::Many(vec![
+            Event::ZoneChanged(ZoneInfo {
+                short_name: z.short_name,
+                long_name: z.long_name,
+            }),
+            Event::ZoneEnvironmentChanged(ZoneEnvironment {
+                zone_file: z.zonefile,
+                experience_multiplier: z.zone_exp_multiplier,
+                safe_x: z.safe_x,
+                safe_y: z.safe_y,
+                safe_z: z.safe_z,
+            }),
+        ]),
         Err(_) => Decoded::Malformed,
     }
+}
+
+fn zone_change(bytes: &[u8]) -> Decoded {
+    // Legends carries position but no destination in this 484-byte request.
+    if bytes.len() != 484 {
+        return Decoded::Malformed;
+    }
+    Decoded::One(Event::ZoneTransition {
+        character_name: String::new(),
+        zone_id: None,
+        instance_id: None,
+        confirmed: false,
+    })
+}
+
+fn enter_world(bytes: &[u8]) -> Decoded {
+    if bytes.len() != 72 {
+        return Decoded::Malformed;
+    }
+    let end = bytes
+        .iter()
+        .position(|byte| *byte == 0)
+        .unwrap_or(bytes.len());
+    let name = &bytes[..end];
+    if name.is_empty() || name.len() > 63 || !name.iter().all(|byte| byte.is_ascii_graphic()) {
+        return Decoded::Malformed;
+    }
+    Decoded::One(Event::EnterWorld {
+        character_name: String::from_utf8_lossy(name).into_owned(),
+    })
 }
 
 fn player_profile(bytes: &[u8]) -> Decoded {
@@ -823,7 +869,14 @@ fn invocation(bytes: &[u8]) -> Decoded {
 fn time_of_day(bytes: &[u8]) -> Decoded {
     // 8B timeOfDayStruct: hour@0 u8, minute@1 u8, day@2 u8, month@3 u8,
     // year@4 u16 (+ 2B pad). Read the 6 meaningful bytes; tolerate the pad.
-    if bytes.len() < 6 {
+    if bytes.len() != 8 {
+        return Decoded::Malformed;
+    }
+    if !(1..=24).contains(&bytes[0])
+        || bytes[1] > 59
+        || !(1..=28).contains(&bytes[2])
+        || !(1..=12).contains(&bytes[3])
+    {
         return Decoded::Malformed;
     }
     Decoded::One(Event::TimeOfDay {
@@ -969,9 +1022,23 @@ mod tests {
     }
 
     #[test]
-    fn enter_world_has_no_payload() {
-        let d = EqlBackend.decode("OP_EnterWorld", Dir::ServerToClient, &[]);
-        assert_eq!(d, Decoded::One(Event::EnterWorld));
+    fn enter_world_validates_direction_and_identity() {
+        let mut payload = [0; 72];
+        payload[..6].copy_from_slice(b"Firona");
+        assert_eq!(
+            EqlBackend.decode("OP_EnterWorld", Dir::ClientToServer, &payload),
+            Decoded::One(Event::EnterWorld {
+                character_name: "Firona".into()
+            })
+        );
+        assert_eq!(
+            EqlBackend.decode("OP_EnterWorld", Dir::ServerToClient, &payload),
+            Decoded::Ignored
+        );
+        assert_eq!(
+            EqlBackend.decode("OP_EnterWorld", Dir::ClientToServer, &[]),
+            Decoded::Malformed
+        );
     }
 
     #[test]

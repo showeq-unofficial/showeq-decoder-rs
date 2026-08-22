@@ -631,7 +631,7 @@ fn walk_profile_skills(b: &[u8], prof: &mut PlayerProfile) {
 
 /// `OP_NewZone` (Legends) S>C, ~340B, once per zone-in. Carries the
 /// CURRENT zone as packed NUL-terminated text — `short_name` then `long_name`
-/// (then a zonefile repeat + binary tail we ignore). The daemon drives
+/// (then a zonefile repeat + environment tail). The daemon drives
 /// `ZoneMgr::setZoneByName(short, long)` directly, so no classic-id table is
 /// needed. Confirmed 3-way (2026-07-08): guktop / "The City of Guk",
 /// nektulos / "Nektulos Forest", unrest / "The Estate of Unrest" — each the
@@ -642,25 +642,9 @@ fn walk_profile_skills(b: &[u8], prof: &mut PlayerProfile) {
 /// BIND zone (identical across zones); that opcode is not OP_NewZone and is no
 /// longer decoded here.
 pub fn parse_new_zone(b: &[u8]) -> Result<NewZone, DecodeError> {
-    // short_name @0, long_name after its NUL. Two packed C-strings name the zone
-    // + drive the map; the binary tail (safe point, exp mult, …) is unused.
-    let n0 = b
-        .iter()
-        .position(|&c| c == 0)
-        .ok_or(DecodeError::Short(b.len()))?;
-    if n0 == 0 {
-        return Err(DecodeError::Short(b.len()));
-    }
-    let rest = &b[n0 + 1..];
-    let n1 = rest
-        .iter()
-        .position(|&c| c == 0)
-        .ok_or(DecodeError::Short(b.len()))?;
-    Ok(NewZone {
-        short_name: latin1(&b[..n0]),
-        long_name: latin1(&rest[..n1]),
-        ..Default::default()
-    })
+    // Keep this public compatibility entry point, but make the module parser
+    // the sole implementation used by both the Event backend and direct FFI.
+    new_zone::parse_new_zone(b).map_err(|_| DecodeError::Short(b.len()))
 }
 
 // NOTE: eql has NO local OP_MobUpdate parser — the Legends wire turned out to
@@ -1580,14 +1564,22 @@ mod tests {
 
     #[test]
     fn new_zone_reads_packed_names() {
-        // OP_NewZone layout: short\0 long\0 <binary tail we ignore>.
+        // OP_NewZone layout: short, long, zone file, then environment.
         let mut b = Vec::new();
         b.extend_from_slice(b"guktop\0");
         b.extend_from_slice(b"The City of Guk\0");
-        b.extend_from_slice(&[0u8; 40]);
+        b.extend_from_slice(&[0u8; 2]);
+        b.extend_from_slice(b"guktop.eqg\0");
+        b.extend_from_slice(&[0u8; 90]);
+        b.extend_from_slice(&1.0f32.to_le_bytes());
+        b.extend_from_slice(&[0u8; 28]);
+        b.extend_from_slice(&2.0f32.to_le_bytes());
+        b.extend_from_slice(&1.0f32.to_le_bytes());
+        b.extend_from_slice(&3.0f32.to_le_bytes());
         let z = parse_new_zone(&b).unwrap();
         assert_eq!(z.short_name, "guktop");
         assert_eq!(z.long_name, "The City of Guk");
+        assert_eq!(z.zonefile, "guktop.eqg");
     }
 
     #[test]

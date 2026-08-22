@@ -1,7 +1,7 @@
 use super::*;
 use seq_events::{
     BuffEntry, DoorInfo, Event, GuildInZone, GuildRosterMember, ItemTemplate, LootItemInfo, Pos,
-    ProfileInfo, SpawnInfo, ZoneInfo,
+    ProfileInfo, SessionResetReason, SpawnInfo, ZoneEnvironment, ZoneInfo,
 };
 
 fn pos(seed: i32) -> Pos {
@@ -135,6 +135,9 @@ fn buff() -> BuffEntry {
 #[allow(clippy::too_many_lines)]
 fn canonical_events() -> Vec<Event> {
     vec![
+        Event::SessionReset {
+            reason: SessionResetReason::PlayerProfile,
+        },
         Event::SpawnAdded(spawn()),
         Event::SpawnAdded(SpawnInfo {
             max_hp: None,
@@ -191,9 +194,22 @@ fn canonical_events() -> Vec<Event> {
             hour: 173,
             minute: 174,
         },
+        Event::ZoneTransition {
+            character_name: "player".into(),
+            zone_id: Some(175),
+            instance_id: None,
+            confirmed: true,
+        },
         Event::ZoneChanged(ZoneInfo {
             short_name: "short".into(),
             long_name: "long".into(),
+        }),
+        Event::ZoneEnvironmentChanged(ZoneEnvironment {
+            zone_file: "short.eqg".into(),
+            experience_multiplier: 1.5,
+            safe_x: 176.25,
+            safe_y: -177.5,
+            safe_z: 178.75,
         }),
         Event::PlayerProfile(profile()),
         Event::Stance {
@@ -339,7 +355,9 @@ fn canonical_events() -> Vec<Event> {
             level_old: 253,
             exp: 254,
         },
-        Event::EnterWorld,
+        Event::EnterWorld {
+            character_name: "player".into(),
+        },
     ]
 }
 
@@ -452,6 +470,19 @@ fn reconstruct(batch: &ffi::SessionDecodeBatch) -> Vec<Event> {
         .map(|reference| {
             let i = reference.payload_index as usize;
             match reference.kind {
+                ffi::SessionEventKind::SessionReset => Event::SessionReset {
+                    reason: match batch.session_reset[i].reason {
+                        ffi::EventSessionResetReason::EnterWorld => SessionResetReason::EnterWorld,
+                        ffi::EventSessionResetReason::PlayerProfile => {
+                            SessionResetReason::PlayerProfile
+                        }
+                        ffi::EventSessionResetReason::ZoneTransition => {
+                            SessionResetReason::ZoneTransition
+                        }
+                        ffi::EventSessionResetReason::Explicit => SessionResetReason::Explicit,
+                        _ => unreachable!("known reset reason"),
+                    },
+                },
                 ffi::SessionEventKind::SpawnAdded => {
                     Event::SpawnAdded(unspawn(&batch.spawn_added[i]))
                 }
@@ -531,11 +562,30 @@ fn reconstruct(batch: &ffi::SessionDecodeBatch) -> Vec<Event> {
                         minute: p.minute,
                     }
                 }
+                ffi::SessionEventKind::ZoneTransition => {
+                    let p = &batch.zone_transition[i];
+                    Event::ZoneTransition {
+                        character_name: p.character_name.clone(),
+                        zone_id: p.has_zone_id.then_some(p.zone_id),
+                        instance_id: p.has_instance_id.then_some(p.instance_id),
+                        confirmed: p.confirmed,
+                    }
+                }
                 ffi::SessionEventKind::ZoneChanged => {
                     let p = &batch.zone_changed[i];
                     Event::ZoneChanged(ZoneInfo {
                         short_name: p.short_name.clone(),
                         long_name: p.long_name.clone(),
+                    })
+                }
+                ffi::SessionEventKind::ZoneEnvironmentChanged => {
+                    let p = &batch.zone_environment_changed[i];
+                    Event::ZoneEnvironmentChanged(ZoneEnvironment {
+                        zone_file: p.zone_file.clone(),
+                        experience_multiplier: p.experience_multiplier,
+                        safe_x: p.safe_x,
+                        safe_y: p.safe_y,
+                        safe_z: p.safe_z,
                     })
                 }
                 ffi::SessionEventKind::PlayerProfile => {
@@ -800,7 +850,9 @@ fn reconstruct(batch: &ffi::SessionDecodeBatch) -> Vec<Event> {
                         exp: p.exp,
                     }
                 }
-                ffi::SessionEventKind::EnterWorld => Event::EnterWorld,
+                ffi::SessionEventKind::EnterWorld => Event::EnterWorld {
+                    character_name: batch.enter_world[i].character_name.clone(),
+                },
                 _ => unreachable!("canonical fixture uses known SessionEventKind values"),
             }
         })

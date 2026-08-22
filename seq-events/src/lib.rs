@@ -102,6 +102,30 @@ pub struct ZoneInfo {
     pub long_name: String,
 }
 
+/// Non-identity zone settings carried by `OP_NewZone`.
+///
+/// This is separate from [`ZoneInfo`] because clients can switch maps as soon as
+/// the names arrive, while consumers that do not model safe points or experience
+/// modifiers may explicitly ignore this event.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ZoneEnvironment {
+    pub zone_file: String,
+    pub experience_multiplier: f32,
+    pub safe_x: f32,
+    pub safe_y: f32,
+    pub safe_z: f32,
+}
+
+/// Why the session discarded state that cannot survive a lifecycle boundary.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum SessionResetReason {
+    EnterWorld = 0,
+    PlayerProfile = 1,
+    ZoneTransition = 2,
+    Explicit = 3,
+}
+
 /// One active-buff entry from an OP_BuffList (belongs to the list's owner spawn).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BuffEntry {
@@ -229,8 +253,11 @@ pub struct DoorInfo {
 }
 
 /// A decoded, backend-neutral world event.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Event {
+    /// Stateful correlators were reset before the next event in this batch was
+    /// observed. Hosts must apply this before later events in the batch.
+    SessionReset { reason: SessionResetReason },
     /// A spawn entered the zone (OP_ZoneEntry).
     SpawnAdded(SpawnInfo),
     /// A spawn moved (OP_MobUpdate / OP_NpcMoveUpdate).
@@ -304,7 +331,7 @@ pub enum Event {
     GuildsInZone { guilds: Vec<GuildInZone> },
     /// A Norrath time sync (OP_TimeOfDay). The consumer surfaces it as a time
     /// sync-point (standalone + in its snapshot) so the client can track the
-    /// game clock. `day` 1..28, `month` 1..12, `hour` 0..23, `minute` 0..59.
+    /// game clock. `day` 1..28, `month` 1..12, `hour` 1..24, `minute` 0..59.
     TimeOfDay {
         year: u32,
         month: u32,
@@ -312,8 +339,19 @@ pub enum Event {
         hour: u32,
         minute: u32,
     },
+    /// A zone transition started or was confirmed. The eql request has no
+    /// destination fields, so those values are absent for that backend.
+    ZoneTransition {
+        character_name: String,
+        zone_id: Option<u32>,
+        instance_id: Option<u32>,
+        confirmed: bool,
+    },
     /// Zone changed (OP_NewZone).
     ZoneChanged(ZoneInfo),
+    /// Safe point and other environment settings from the same OP_NewZone.
+    /// This immediately follows [`Event::ZoneChanged`] in the decode batch.
+    ZoneEnvironmentChanged(ZoneEnvironment),
     /// The local player's profile (OP_PlayerProfile).
     PlayerProfile(ProfileInfo),
     /// The player's active STANCE changed (eql OP_Stance echo). `name` is the
@@ -534,13 +572,13 @@ pub enum Event {
         level_old: u32,
         exp: u32,
     },
-    /// Zone-in boundary marker (OP_EnterWorld) — no payload; the daemon uses it
-    /// to reset per-zone state.
-    EnterWorld,
+    /// The client entered the world with a character. A
+    /// [`Event::SessionReset`] immediately precedes this event.
+    EnterWorld { character_name: String },
 }
 
 /// Outcome of decoding one app packet.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Decoded {
     /// One neutral event.
     One(Event),

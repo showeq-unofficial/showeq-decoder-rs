@@ -20,6 +20,8 @@ pub struct TimeOfDay {
 pub enum TimeOfDayError {
     #[error("expected {PAYLOAD_LEN} bytes, got {0}")]
     BadLength(usize),
+    #[error("time field {0} is outside its protocol range")]
+    InvalidField(&'static str),
 }
 
 pub fn parse_time_of_day(bytes: &[u8]) -> Result<TimeOfDay, TimeOfDayError> {
@@ -28,13 +30,26 @@ pub fn parse_time_of_day(bytes: &[u8]) -> Result<TimeOfDay, TimeOfDayError> {
     }
     let raw: timeOfDayStruct =
         unsafe { std::ptr::read_unaligned(bytes.as_ptr() as *const timeOfDayStruct) };
-    Ok(TimeOfDay {
+    let value = TimeOfDay {
         hour: unsafe { std::ptr::addr_of!(raw.hour).read_unaligned() },
         minute: unsafe { std::ptr::addr_of!(raw.minute).read_unaligned() },
         day: unsafe { std::ptr::addr_of!(raw.day).read_unaligned() },
         month: unsafe { std::ptr::addr_of!(raw.month).read_unaligned() },
         year: unsafe { std::ptr::addr_of!(raw.year).read_unaligned() },
-    })
+    };
+    if !(1..=24).contains(&value.hour) {
+        return Err(TimeOfDayError::InvalidField("hour"));
+    }
+    if value.minute > 59 {
+        return Err(TimeOfDayError::InvalidField("minute"));
+    }
+    if !(1..=28).contains(&value.day) {
+        return Err(TimeOfDayError::InvalidField("day"));
+    }
+    if !(1..=12).contains(&value.month) {
+        return Err(TimeOfDayError::InvalidField("month"));
+    }
+    Ok(value)
 }
 
 #[cfg(test)]
@@ -65,6 +80,18 @@ mod tests {
                 month: 11,
                 year: 3789
             }
+        );
+    }
+
+    #[test]
+    fn rejects_values_outside_the_game_clock() {
+        let mut buf = [0u8; PAYLOAD_LEN];
+        buf[0] = 25;
+        buf[2] = 1;
+        buf[3] = 1;
+        assert_eq!(
+            parse_time_of_day(&buf),
+            Err(TimeOfDayError::InvalidField("hour"))
         );
     }
 }

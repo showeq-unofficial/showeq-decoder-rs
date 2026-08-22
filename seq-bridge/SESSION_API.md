@@ -24,9 +24,17 @@ semantic SHA-256.
 `SessionDecodeBatch.events` preserves Rust event order. Each entry has a
 `SessionEventKind` and `payload_index`. Read the index from the typed vector
 named for that event. `Stance` and `Invocation` share `named`; `Targeted` and
-`Considered` share `spawn_id`. `EnterWorld` has no payload and uses index zero.
-All other tags have a same-named payload vector. This is the cxx-compatible
+`Considered` share `spawn_id`. Lifecycle events use `session_reset`,
+`zone_transition`, `zone_environment_changed`, and `enter_world`. All other
+tags have a same-named payload vector. This is the cxx-compatible
 tagged form from which the host can build an exhaustive `std::variant`.
+
+Lifecycle batches have strict ordering. A reset caused by `OP_EnterWorld`, a
+profile, or a confirmed Live/Test zone transition precedes the event that
+caused it. `OP_NewZone` emits `ZoneChanged` followed by
+`ZoneEnvironmentChanged`. The EQL `OP_ZoneChange` request has no destination
+and does not reset session state. A malformed lifecycle packet emits no event
+and changes no correlation state.
 
 The batch also returns `protocol_generation`, `SessionDisposition`, and the
 EQL shadow correlation outputs `self_stats` and `loot_rows`. Call `flush` at

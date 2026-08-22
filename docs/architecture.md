@@ -73,6 +73,13 @@ vector in the same batch. C++ switches on the tag, indexes the matching vector,
 and constructs its `std::variant`; it never interprets a map or opcode name.
 `self_stats` and `loot_rows` carry the phase-2 EQL shadow correlator output.
 
+Lifecycle events add their state boundary to the same ordered batch. A
+`SessionReset` precedes `EnterWorld`, `PlayerProfile`, or a confirmed Live/Test
+`ZoneTransition`. `ZoneChanged` precedes `ZoneEnvironmentChanged` for one
+`OP_NewZone`. Parsers validate lifecycle direction, payload size, names, time
+ranges, and finite environment values before the session changes correlation
+state.
+
 The checked-in protocol TOML contains only stream, ID, and opcode name. See
 [`seq-protocol-data/README.md`](../seq-protocol-data/README.md) for the
 deterministic transitional drift check against scry-cpp. Host payload typename

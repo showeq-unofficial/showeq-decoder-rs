@@ -7,7 +7,7 @@
 
 use seq_events::{
     heading_deg, Backend, Decoded, Dir, DoorInfo, Event, GuildInZone, GuildRosterMember,
-    ItemTemplate, Pos, ProfileInfo, SpawnInfo, ZoneInfo,
+    ItemTemplate, Pos, ProfileInfo, SpawnInfo, ZoneEnvironment, ZoneInfo,
 };
 
 /// The Live/Test backend (shared `seq-decode` parsers).
@@ -27,8 +27,11 @@ impl Backend for LiveBackend {
             "OP_DeleteSpawn" => delete_spawn(bytes),
             "OP_HPUpdate" => hp_update(bytes),
             "OP_Death" => death(bytes),
-            "OP_NewZone" => new_zone(bytes),
-            "OP_PlayerProfile" => player_profile(bytes),
+            "OP_NewZone" if dir == Dir::ServerToClient => new_zone(bytes),
+            "OP_NewZone" => Decoded::Ignored,
+            "OP_PlayerProfile" if dir == Dir::ServerToClient => player_profile(bytes),
+            "OP_PlayerProfile" => Decoded::Ignored,
+            "OP_ZoneChange" => zone_change(bytes, dir),
             "OP_ClientUpdate" => self_pos(bytes),
             "OP_Illusion" => illusion(bytes),
             "OP_ManaChange" => mana_change(bytes),
@@ -53,10 +56,14 @@ impl Backend for LiveBackend {
             "OP_ExpandedGuildInfo" => expanded_guild_info(bytes),
             "OP_ExpUpdate" => exp(bytes),
             "OP_AAExpUpdate" => aa_exp(bytes),
-            "OP_TimeOfDay" => time_of_day(bytes),
+            "OP_TimeOfDay" if dir == Dir::ServerToClient => time_of_day(bytes),
+            "OP_TimeOfDay" => Decoded::Ignored,
+            "OP_ZoneServerInfo" if dir == Dir::ServerToClient => zone_server_info(bytes),
+            "OP_ZoneServerInfo" => Decoded::Ignored,
             "OP_GroupFollow" => group_follow(bytes),
             "OP_GroupDisband" | "OP_GroupDisband2" => group_disband(bytes),
-            "OP_EnterWorld" => Decoded::One(Event::EnterWorld),
+            "OP_EnterWorld" if dir == Dir::ClientToServer => enter_world(bytes),
+            "OP_EnterWorld" => Decoded::Ignored,
             _ => Decoded::Unhandled,
         }
     }
@@ -234,12 +241,60 @@ fn death(bytes: &[u8]) -> Decoded {
 
 fn new_zone(bytes: &[u8]) -> Decoded {
     match seq_decode::new_zone::parse_new_zone(bytes) {
-        Ok(z) => Decoded::One(Event::ZoneChanged(ZoneInfo {
-            short_name: z.short_name,
-            long_name: z.long_name,
-        })),
+        Ok(z) => Decoded::Many(vec![
+            Event::ZoneChanged(ZoneInfo {
+                short_name: z.short_name,
+                long_name: z.long_name,
+            }),
+            Event::ZoneEnvironmentChanged(ZoneEnvironment {
+                zone_file: z.zonefile,
+                experience_multiplier: z.zone_exp_multiplier,
+                safe_x: z.safe_x,
+                safe_y: z.safe_y,
+                safe_z: z.safe_z,
+            }),
+        ]),
         Err(_) => Decoded::Malformed,
     }
+}
+
+fn zone_change(bytes: &[u8], dir: Dir) -> Decoded {
+    match seq_decode::zone_change::parse_zone_change(bytes) {
+        Ok(zone) => Decoded::One(Event::ZoneTransition {
+            character_name: zone.name,
+            zone_id: Some(u32::from(zone.zone_id)),
+            instance_id: Some(u32::from(zone.zone_instance)),
+            confirmed: dir == Dir::ServerToClient,
+        }),
+        Err(_) => Decoded::Malformed,
+    }
+}
+
+fn zone_server_info(bytes: &[u8]) -> Decoded {
+    match seq_decode::zone_server_info::parse_zone_server_info(bytes) {
+        Ok(info) => Decoded::One(Event::ZoneServerInfo {
+            host: info.host,
+            port: u32::from(info.port),
+        }),
+        Err(_) => Decoded::Malformed,
+    }
+}
+
+fn enter_world(bytes: &[u8]) -> Decoded {
+    if bytes.len() != 72 {
+        return Decoded::Malformed;
+    }
+    let end = bytes
+        .iter()
+        .position(|byte| *byte == 0)
+        .unwrap_or(bytes.len());
+    let name = &bytes[..end];
+    if name.is_empty() || name.len() > 63 || !name.iter().all(|byte| byte.is_ascii_graphic()) {
+        return Decoded::Malformed;
+    }
+    Decoded::One(Event::EnterWorld {
+        character_name: String::from_utf8_lossy(name).into_owned(),
+    })
 }
 
 fn player_profile(bytes: &[u8]) -> Decoded {
@@ -597,9 +652,23 @@ mod tests {
     }
 
     #[test]
-    fn enter_world_has_no_payload() {
-        let d = LiveBackend.decode("OP_EnterWorld", Dir::ServerToClient, &[]);
-        assert_eq!(d, Decoded::One(Event::EnterWorld));
+    fn enter_world_validates_direction_and_identity() {
+        let mut payload = [0; 72];
+        payload[..6].copy_from_slice(b"Firona");
+        assert_eq!(
+            LiveBackend.decode("OP_EnterWorld", Dir::ClientToServer, &payload),
+            Decoded::One(Event::EnterWorld {
+                character_name: "Firona".into()
+            })
+        );
+        assert_eq!(
+            LiveBackend.decode("OP_EnterWorld", Dir::ServerToClient, &payload),
+            Decoded::Ignored
+        );
+        assert_eq!(
+            LiveBackend.decode("OP_EnterWorld", Dir::ClientToServer, &[]),
+            Decoded::Malformed
+        );
     }
 
     #[test]
