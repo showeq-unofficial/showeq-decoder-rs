@@ -1,0 +1,171 @@
+# Canonical Rust opcode lookup data.
+# Generated with tools/import_host_catalogs.py during host migration.
+# Payload typename and size gates intentionally stay in the host.
+
+[[world]]
+id = "084f"
+name = "OP_SetChatServer2"
+
+[[world]]
+id = "3603"
+name = "OP_WorldComplete"
+
+[[world]]
+id = "3ed7"
+name = "OP_SendExeChecksum"
+
+[[world]]
+id = "4c13"
+name = "OP_ExpansionInfo"
+
+[[world]]
+id = "4f96"
+name = "OP_SetChatServer"
+
+[[world]]
+id = "5986"
+name = "OP_ZoneServerInfo"
+
+[[world]]
+id = "5a59"
+name = "OP_EnterWorld"
+
+[[world]]
+id = "60b5"
+name = "OP_SendBaseDataChecksum"
+
+[[world]]
+id = "aae4"
+name = "OP_SendLoginInfo"
+
+[[world]]
+id = "bb86"
+name = "OP_SendSpellChecksum"
+
+[[world]]
+id = "f6e7"
+name = "OP_SendSkillCapsChecksum"
+
+[[zone]]
+id = "0616"
+name = "OP_ZoneChange"
+
+[[zone]]
+id = "0699"
+name = "OP_ItemPacket"
+
+[[zone]]
+id = "084e"
+name = "OP_NpcMoveUpdate"
+
+[[zone]]
+id = "0b2a"
+name = "OP_SendZonePoints"
+
+[[zone]]
+id = "13d0"
+name = "OP_TargetMouse"
+
+[[zone]]
+id = "1bb1"
+name = "OP_RemoveSpawn"
+
+[[zone]]
+id = "1d04"
+name = "OP_MobUpdate"
+
+[[zone]]
+id = "1f46"
+name = "OP_ExpandedGuildInfo"
+
+[[zone]]
+id = "25de"
+name = "OP_AAExpUpdate"
+
+[[zone]]
+id = "2e90"
+name = "OP_GuildMemberList"
+
+[[zone]]
+id = "3635"
+name = "OP_PlayerProfile"
+
+[[zone]]
+id = "3f08"
+name = "OP_ZoneEntry"
+
+[[zone]]
+id = "41eb"
+name = "OP_GuildMemberUpdate"
+
+[[zone]]
+id = "4654"
+name = "OP_Find"
+
+[[zone]]
+id = "5760"
+name = "OP_ClientUpdate"
+
+[[zone]]
+id = "576a"
+name = "OP_Consider"
+
+[[zone]]
+id = "5d39"
+name = "OP_DeleteSpawn"
+
+[[zone]]
+id = "6d3a"
+name = "OP_FormattedMessage"
+
+[[zone]]
+id = "6e56"
+name = "OP_SpawnAppearance"
+
+[[zone]]
+id = "725b"
+name = "OP_NewZone"
+
+[[zone]]
+id = "7730"
+name = "OP_SpecialMesg"
+
+[[zone]]
+id = "91b1"
+name = "OP_GuildMOTD"
+
+[[zone]]
+id = "a1d2"
+name = "OP_Death"
+
+[[zone]]
+id = "a831"
+name = "OP_Action"
+
+[[zone]]
+id = "b640"
+name = "OP_SpawnDoor"
+
+[[zone]]
+id = "cad9"
+name = "OP_GroundSpawn"
+
+[[zone]]
+id = "d0f7"
+name = "OP_ClickObject"
+
+[[zone]]
+id = "d2e0"
+name = "OP_SimpleMessage"
+
+[[zone]]
+id = "e7bb"
+name = "OP_TimeOfDay"
+
+[[zone]]
+id = "eba8"
+name = "OP_CommonMessage"
+
+[[zone]]
+id = "fe06"
+name = "OP_GuildsInZoneList"

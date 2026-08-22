@@ -1,0 +1,387 @@
+# Canonical Rust opcode lookup data.
+# Generated with tools/import_host_catalogs.py during host migration.
+# Payload typename and size gates intentionally stay in the host.
+
+[[world]]
+id = "001a"
+name = "OP_LoginServerInfo"
+
+[[world]]
+id = "2e9f"
+name = "OP_SendSpellChecksum"
+
+[[world]]
+id = "34bb"
+name = "OP_SendBaseDataChecksum"
+
+[[world]]
+id = "4398"
+name = "OP_LogServer"
+
+[[world]]
+id = "5afc"
+name = "OP_DeleteCharacter"
+
+[[world]]
+id = "5f8b"
+name = "OP_SetChatServer"
+
+[[world]]
+id = "6530"
+name = "OP_WorldComplete"
+
+[[world]]
+id = "759e"
+name = "OP_SetChatServer2"
+
+[[world]]
+id = "8927"
+name = "OP_SendSkillCapsChecksum"
+
+[[world]]
+id = "aca4"
+name = "OP_SendLoginInfo"
+
+[[world]]
+id = "b67c"
+name = "OP_ZoneServerInfo"
+
+[[world]]
+id = "bc01"
+name = "OP_GuildList"
+
+[[world]]
+id = "c26e"
+name = "OP_ExpansionInfo"
+
+[[world]]
+id = "c8ca"
+name = "OP_ApproveWorld"
+
+[[world]]
+id = "cc83"
+name = "OP_CharacterCreate"
+
+[[world]]
+id = "d99c"
+name = "OP_SendExeChecksum"
+
+[[world]]
+id = "dc1c"
+name = "OP_MOTD"
+
+[[world]]
+id = "de55"
+name = "OP_SendCharInfo"
+
+[[world]]
+id = "e901"
+name = "OP_ApproveName"
+
+[[world]]
+id = "f31f"
+name = "OP_EnterWorld"
+
+[[zone]]
+id = "0303"
+name = "OP_HPUpdate"
+
+[[zone]]
+id = "04c7"
+name = "OP_GroupLeader"
+
+[[zone]]
+id = "0a37"
+name = "OP_BuffWindow"
+
+[[zone]]
+id = "0c97"
+name = "OP_AAExpUpdate"
+
+[[zone]]
+id = "0d56"
+name = "OP_ExpUpdate"
+
+[[zone]]
+id = "0ecf"
+name = "OP_WearChange"
+
+[[zone]]
+id = "0f64"
+name = "OP_Find"
+
+[[zone]]
+id = "1325"
+name = "OP_GroupMemberLeave"
+
+[[zone]]
+id = "132d"
+name = "OP_SendZonePoints"
+
+[[zone]]
+id = "14b6"
+name = "OP_InspectRequest"
+
+[[zone]]
+id = "14dc"
+name = "OP_AAAction"
+
+[[zone]]
+id = "16a3"
+name = "OP_EndUpdate"
+
+[[zone]]
+id = "1ff6"
+name = "OP_Consider"
+
+[[zone]]
+id = "23a2"
+name = "OP_SimpleMessage"
+
+[[zone]]
+id = "27fa"
+name = "OP_GroupDisband"
+
+[[zone]]
+id = "306c"
+name = "OP_BuffQuery"
+
+[[zone]]
+id = "312a"
+name = "OP_GroupMemberList"
+
+[[zone]]
+id = "36c7"
+name = "OP_Animation"
+
+[[zone]]
+id = "36d1"
+name = "OP_ManaUpdate"
+
+[[zone]]
+id = "394a"
+name = "OP_RemoveSpawn"
+
+[[zone]]
+id = "3d3b"
+name = "OP_SendAATable"
+
+[[zone]]
+id = "3f07"
+name = "OP_SpecialMesg"
+
+[[zone]]
+id = "4058"
+name = "OP_GuildMemberList"
+
+[[zone]]
+id = "4396"
+name = "OP_GroupFollow2"
+
+[[zone]]
+id = "4939"
+name = "OP_RandomReply"
+
+[[zone]]
+id = "4ad7"
+name = "OP_Action2"
+
+[[zone]]
+id = "4c14"
+name = "OP_AutoAttack2"
+
+[[zone]]
+id = "5617"
+name = "OP_ManaChange"
+
+[[zone]]
+id = "57f1"
+name = "OP_InspectAnswer"
+
+[[zone]]
+id = "59ab"
+name = "OP_GroupInviteAccepted"
+
+[[zone]]
+id = "5fc3"
+name = "OP_NewZone"
+
+[[zone]]
+id = "7324"
+name = "OP_GroupMemberInfo"
+
+[[zone]]
+id = "786a"
+name = "OP_Stamina"
+
+[[zone]]
+id = "7b00"
+name = "OP_GroundSpawn"
+
+[[zone]]
+id = "7ee2"
+name = "OP_GroupCancelInvite"
+
+[[zone]]
+id = "8ac8"
+name = "OP_Action"
+
+[[zone]]
+id = "8cd3"
+name = "OP_SpawnAppearance2"
+
+[[zone]]
+id = "8d86"
+name = "OP_ExpandedGuildInfo"
+
+[[zone]]
+id = "8fa1"
+name = "OP_GroupUpdate"
+
+[[zone]]
+id = "904f"
+name = "OP_MemorizeSpell"
+
+[[zone]]
+id = "9377"
+name = "OP_ClientUpdate"
+
+[[zone]]
+id = "9a58"
+name = "OP_FormattedMessage"
+
+[[zone]]
+id = "9abe"
+name = "OP_GuildMemberUpdate"
+
+[[zone]]
+id = "9b04"
+name = "OP_CommonMessage"
+
+[[zone]]
+id = "9f2b"
+name = "OP_GuildMOTD"
+
+[[zone]]
+id = "9fd4"
+name = "OP_SpawnAppearance"
+
+[[zone]]
+id = "a183"
+name = "OP_DeleteSpawn"
+
+[[zone]]
+id = "a994"
+name = "OP_MovementHistory"
+
+[[zone]]
+id = "aaca"
+name = "OP_NpcMoveUpdate"
+
+[[zone]]
+id = "aaed"
+name = "OP_PlayerProfile"
+
+[[zone]]
+id = "ae0a"
+name = "OP_SpawnDoor"
+
+[[zone]]
+id = "b27d"
+name = "OP_AutoAttack"
+
+[[zone]]
+id = "b3b7"
+name = "OP_GroupMakeLeader"
+
+[[zone]]
+id = "bdab"
+name = "OP_GroupInvite"
+
+[[zone]]
+id = "be93"
+name = "OP_ZoneEntry"
+
+[[zone]]
+id = "c2d8"
+name = "OP_GroupDisband2"
+
+[[zone]]
+id = "c71c"
+name = "OP_RandomReq"
+
+[[zone]]
+id = "c7ce"
+name = "OP_TargetMouse"
+
+[[zone]]
+id = "c893"
+name = "OP_RespondAA"
+
+[[zone]]
+id = "ca54"
+name = "OP_TimeOfDay"
+
+[[zone]]
+id = "cdf9"
+name = "OP_ZoneChange"
+
+[[zone]]
+id = "d18f"
+name = "OP_MobHealth"
+
+[[zone]]
+id = "d5e8"
+name = "OP_GuildsInZoneList"
+
+[[zone]]
+id = "d7f4"
+name = "OP_Buff"
+
+[[zone]]
+id = "e2b7"
+name = "OP_GroupInvite2Sent"
+
+[[zone]]
+id = "e461"
+name = "OP_LevelUpdate"
+
+[[zone]]
+id = "e6dd"
+name = "OP_BeginCast"
+
+[[zone]]
+id = "e883"
+name = "OP_MoveItem"
+
+[[zone]]
+id = "e8bc"
+name = "OP_ItemPacket"
+
+[[zone]]
+id = "ead6"
+name = "OP_CastSpell"
+
+[[zone]]
+id = "eeb4"
+name = "OP_GroupFollow"
+
+[[zone]]
+id = "eff9"
+name = "OP_MobUpdate"
+
+[[zone]]
+id = "f525"
+name = "OP_ClickObject"
+
+[[zone]]
+id = "f752"
+name = "OP_Death"
+
+[[zone]]
+id = "fbcc"
+name = "OP_SkillUpdate"
+
+[[zone]]
+id = "fc1d"
+name = "OP_GroupInvite2"

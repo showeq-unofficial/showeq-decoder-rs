@@ -50,6 +50,25 @@ entirely) for the C++ daemon, while it also implements the neutral
 call paths land on the exact same parser code, which is the whole point:
 one eql decode implementation, not two.
 
+## Stateful session path
+
+`seq-protocol-data` embeds the mapped Live, Test, and EQL opcode catalogs. A
+lookup always specifies `BackendId` and `StreamKind`, because world and zone
+IDs can collide. Runtime reload parses and validates a complete backend file
+before swapping it into `ProtocolRegistry`; a failed read or parse leaves the
+previous generation active.
+
+`seq-session` is the new host entry point. It accepts numeric opcodes, records
+the protocol generation on every `DecodeBatch`, dispatches to the immutable
+backend selected at construction, and owns EQL self and loot trackers. The
+existing name-based `Backend::decode`, opcode-specific C++ bridge, and public
+standalone tracker APIs remain intact during shadow migration.
+
+The checked-in protocol TOML contains only stream, ID, and opcode name. See
+[`seq-protocol-data/README.md`](../seq-protocol-data/README.md) for the
+deterministic transitional drift check against scry-cpp. Host payload typename
+and size gates are not copied into Rust protocol data.
+
 ## Backend isolation: why eql is a clean break
 
 Rationale: eql is a separate server, and riding Live's decoders meant a

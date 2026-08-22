@@ -1,0 +1,17 @@
+[package]
+name = "seq-session"
+description = "Stateful backend-dispatched packet decoding session"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+seq-backend-eql.workspace = true
+seq-backend-live.workspace = true
+seq-events.workspace = true
+seq-protocol-data.workspace = true
+
+[lints]
+workspace = true
