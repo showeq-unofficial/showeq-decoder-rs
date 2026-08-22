@@ -28,9 +28,9 @@ seq-structs-live = { path = "seq-structs-live" }
 seq-structs-test = { path = "seq-structs-test" }
 seq-backend-eql = { path = "seq-backend-eql" }
 seq-events = { path = "seq-events" }
-seq-backend-live = { path = "seq-backend-live" }
+seq-backend-live = { path = "seq-backend-live", default-features = false }
 seq-protocol-data = { path = "seq-protocol-data" }
-seq-session = { path = "seq-session" }
+seq-session = { path = "seq-session", default-features = false }
 
 [profile.release]
 lto = "thin"

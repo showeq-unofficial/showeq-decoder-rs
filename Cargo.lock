@@ -274,6 +274,9 @@ dependencies = [
  "cxx-build",
  "seq-backend-eql",
  "seq-decode",
+ "seq-events",
+ "seq-protocol-data",
+ "seq-session",
 ]
 
 [[package]]

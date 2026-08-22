@@ -7,9 +7,15 @@ license.workspace = true
 authors.workspace = true
 rust-version.workspace = true
 
+[features]
+default = ["backend-live", "backend-eql"]
+backend-live = ["dep:seq-backend-live", "seq-backend-live/backend-live"]
+backend-test = ["dep:seq-backend-live", "seq-backend-live/backend-test"]
+backend-eql = ["dep:seq-backend-eql"]
+
 [dependencies]
-seq-backend-eql.workspace = true
-seq-backend-live.workspace = true
+seq-backend-eql = { workspace = true, optional = true }
+seq-backend-live = { workspace = true, default-features = false, optional = true }
 seq-events.workspace = true
 seq-protocol-data.workspace = true
 

@@ -17,10 +17,11 @@ features on `seq-bridge` (the daemon's `-DSEQ_TARGET=live|test|eql` maps 1:1):
 | `backend-test` | `seq-decode` + `seq-structs-test`                        |
 | `backend-eql`  | `seq-backend-eql` only — no `seq-decode` edge            |
 
-The FFI surface is uniform: `decode_*` names are identical for every backend;
-the linked feature decides each function's implementation via a module alias
-(`use seq_decode as backend` vs `use seq_backend_eql as backend`). Exactly one
-backend feature must be enabled (`compile_error!` otherwise).
+The legacy FFI surface is uniform: `decode_*` names are identical for every
+backend; the linked feature decides each function's implementation via a
+module alias (`use seq_decode as backend` vs `use seq_backend_eql as backend`).
+The same feature selects the numeric-opcode `SessionResource`. Exactly one
+bridge backend feature must be enabled (`compile_error!` otherwise).
 
 ## Workspace
 
@@ -34,7 +35,7 @@ backend feature must be enabled (`compile_error!` otherwise).
 | `seq-backend-live`  | Live/Test projection from parser output into `seq-events::Event`. |
 | `seq-protocol-data` | Rust-owned Live, Test, and EQL opcode catalogs with stream-qualified lookup, validation, stable hashes, and atomic runtime reload. |
 | `seq-session`       | Stateful ID-based backend dispatch. One session owns EQL self and loot correlation for one ordered packet stream. |
-| `seq-bridge`        | `cxx` FFI shim (staticlib) — the only crate the daemon links. |
+| `seq-bridge`        | `cxx` FFI shim (staticlib): retained opcode calls plus opaque protocol/session resources and exhaustive typed Event batches. |
 
 `seq-backend-eql` deliberately depends on nothing from `seq-decode`: eql is a
 separate server, and riding Live's decoders meant a Live-only wire patch could

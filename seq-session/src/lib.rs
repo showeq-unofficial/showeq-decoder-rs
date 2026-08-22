@@ -3,11 +3,23 @@
 //! Existing name-based backend decoders remain public for compatibility. New
 //! hosts should keep one `Session` per ordered application-packet stream.
 
+#[cfg(not(any(
+    feature = "backend-live",
+    feature = "backend-test",
+    feature = "backend-eql"
+)))]
+compile_error!("seq-session: enable at least one backend feature");
+#[cfg(all(feature = "backend-live", feature = "backend-test"))]
+compile_error!("seq-session: backend-live and backend-test use different struct mirrors");
+
+#[cfg(feature = "backend-eql")]
 use seq_backend_eql::{backend::EqlBackend, LootTracker, SelfTracker};
+#[cfg(any(feature = "backend-live", feature = "backend-test"))]
 use seq_backend_live::LiveBackend;
 use seq_events::{Backend, Decoded};
 use std::sync::Arc;
 
+#[cfg(feature = "backend-eql")]
 pub use seq_backend_eql::{LootRow, SelfStat};
 pub use seq_events::{Dir, Dir as Direction, Event};
 pub use seq_protocol_data::{
@@ -52,11 +64,15 @@ pub struct SelfIdentity {
 }
 
 enum BackendSession {
+    #[cfg(any(feature = "backend-live", feature = "backend-test"))]
     Live(LiveBackend),
+    #[cfg(any(feature = "backend-live", feature = "backend-test"))]
     Test(LiveBackend),
+    #[cfg(feature = "backend-eql")]
     Eql(Box<EqlSession>),
 }
 
+#[cfg(feature = "backend-eql")]
 struct EqlSession {
     decoder: EqlBackend,
     self_tracker: SelfTracker,
@@ -66,6 +82,7 @@ struct EqlSession {
     loot_rows: Vec<LootRow>,
 }
 
+#[cfg(feature = "backend-eql")]
 impl Default for EqlSession {
     fn default() -> Self {
         Self {
@@ -89,11 +106,16 @@ pub struct Session {
 impl Session {
     pub fn new(config: SessionConfig) -> Self {
         let decoder = match config.backend {
+            #[cfg(any(feature = "backend-live", feature = "backend-test"))]
             BackendId::Live => BackendSession::Live(LiveBackend),
             // Test currently shares Live's wire decoder. Its opcode catalog is
             // still independent, so a patch-day ID rotation cannot cross over.
+            #[cfg(any(feature = "backend-live", feature = "backend-test"))]
             BackendId::Test => BackendSession::Test(LiveBackend),
+            #[cfg(feature = "backend-eql")]
             BackendId::Eql => BackendSession::Eql(Box::default()),
+            #[allow(unreachable_patterns)]
+            unsupported => panic!("backend {unsupported} is not linked into seq-session"),
         };
         Self {
             backend: config.backend,
@@ -124,7 +146,7 @@ impl Session {
         opcode_id: OpcodeId,
         direction: Direction,
         payload: &[u8],
-        timestamp: i64,
+        _timestamp: i64,
     ) -> DecodeBatch {
         let catalog = self.protocol_registry.snapshot(self.backend);
         let generation = catalog.generation();
@@ -137,12 +159,14 @@ impl Session {
         };
 
         let decoded = match &mut self.decoder {
+            #[cfg(any(feature = "backend-live", feature = "backend-test"))]
             BackendSession::Live(backend) | BackendSession::Test(backend) => {
                 backend.decode(opcode_name, direction, payload)
             }
+            #[cfg(feature = "backend-eql")]
             BackendSession::Eql(state) => {
                 let decoded = state.decoder.decode(opcode_name, direction, payload);
-                state.observe(&decoded, opcode_name, direction, payload, timestamp);
+                state.observe(&decoded, opcode_name, direction, payload, _timestamp);
                 decoded
             }
         };
@@ -154,43 +178,57 @@ impl Session {
     /// Phase 2 still emits the existing low-level `Event` variants, so EQL loot
     /// rows are drained separately with `take_loot_rows` during shadow parity.
     pub fn flush(&mut self, _reason: FlushReason) -> Vec<Event> {
-        if let BackendSession::Eql(state) = &mut self.decoder {
-            state.loot_rows.extend(state.loot_tracker.flush());
-            state.loot_tracker.reset();
-            state.self_tracker.reset();
+        match &mut self.decoder {
+            #[cfg(feature = "backend-eql")]
+            BackendSession::Eql(state) => {
+                state.loot_rows.extend(state.loot_tracker.flush());
+                state.loot_tracker.reset();
+                state.self_tracker.reset();
+            }
+            #[cfg(any(feature = "backend-live", feature = "backend-test"))]
+            BackendSession::Live(_) | BackendSession::Test(_) => {}
         }
         Vec::new()
     }
 
     /// Current EQL self-correlation state. Non-EQL sessions return zeros.
     pub fn self_identity(&self) -> SelfIdentity {
+        #[allow(unreachable_patterns)]
         match &self.decoder {
+            #[cfg(feature = "backend-eql")]
             BackendSession::Eql(state) => SelfIdentity {
                 self_id: state.self_tracker.self_id(),
                 alt_id: state.self_tracker.alt_id(),
                 provisional_id: state.self_tracker.provisional_id(),
             },
+            #[cfg(any(feature = "backend-live", feature = "backend-test"))]
             BackendSession::Live(_) | BackendSession::Test(_) => SelfIdentity::default(),
+            _ => SelfIdentity::default(),
         }
     }
 
     /// Drain EQL self-vitals attributed by the session tracker.
+    #[cfg(feature = "backend-eql")]
     pub fn take_self_stats(&mut self) -> Vec<SelfStat> {
         match &mut self.decoder {
             BackendSession::Eql(state) => std::mem::take(&mut state.self_stats),
+            #[cfg(any(feature = "backend-live", feature = "backend-test"))]
             BackendSession::Live(_) | BackendSession::Test(_) => Vec::new(),
         }
     }
 
     /// Drain EQL loot rows completed by the session tracker.
+    #[cfg(feature = "backend-eql")]
     pub fn take_loot_rows(&mut self) -> Vec<LootRow> {
         match &mut self.decoder {
             BackendSession::Eql(state) => std::mem::take(&mut state.loot_rows),
+            #[cfg(any(feature = "backend-live", feature = "backend-test"))]
             BackendSession::Live(_) | BackendSession::Test(_) => Vec::new(),
         }
     }
 }
 
+#[cfg(feature = "backend-eql")]
 impl EqlSession {
     fn observe(
         &mut self,
@@ -352,7 +390,7 @@ fn batch(generation: ProtocolGeneration, decoded: Decoded) -> DecodeBatch {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "backend-eql"))]
 mod tests {
     use super::*;
 

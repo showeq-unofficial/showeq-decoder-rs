@@ -27,11 +27,13 @@ and each gets its own FFI surface — they don't share one:
 - **`seq-bridge`** is a `cxx` staticlib consumed by `scry-cpp`. Its
   `backend-live`/`backend-test` Cargo features link `seq-decode` (which
   `#[cfg]`-selects `seq-structs-live` or `seq-structs-test` as its binding
-  crate); `backend-eql` links **only** `seq-backend-eql`, calling its
-  `parse_*` functions directly — no `seq-events`, no `Backend` trait, no
-  `seq-decode` edge. The `decode_*` FFI names are identical across all
-  three features; only the linked implementation differs (verify with
-  `cargo tree -p seq-bridge --no-default-features --features backend-eql`).
+  crate); the `backend-eql` decoder edge links only `seq-backend-eql`, calling
+  its `parse_*` functions directly. The session path also links the neutral
+  `seq-events`, `seq-protocol-data`, and EQL-only `seq-session` features, but
+  it has no `seq-decode` or `seq-backend-live` edge. The `decode_*` FFI names
+  are identical across all three features; only the linked implementation
+  differs (verify with `cargo tree -p seq-bridge --no-default-features
+  --features backend-eql`).
 - **`seq-events`** + **`seq-backend-live`** + **`seq-backend-eql`** form the
   neutral contract consumed by scry's Elixir NIF (`scry`'s
   `native/scry_nif`, a separate crate in the `scry` repo that path-deps on
@@ -63,6 +65,13 @@ the protocol generation on every `DecodeBatch`, dispatches to the immutable
 backend selected at construction, and owns EQL self and loot trackers. The
 existing name-based `Backend::decode`, opcode-specific C++ bridge, and public
 standalone tracker APIs remain intact during shadow migration.
+
+For C++, `seq-bridge` exposes `SessionProtocolRegistry` and `SessionResource`
+as opaque cxx resources. `SessionDecodeBatch.events` contains ordered
+`{SessionEventKind, payload_index}` references. Each Event payload has a typed
+vector in the same batch. C++ switches on the tag, indexes the matching vector,
+and constructs its `std::variant`; it never interprets a map or opcode name.
+`self_stats` and `loot_rows` carry the phase-2 EQL shadow correlator output.
 
 The checked-in protocol TOML contains only stream, ID, and opcode name. See
 [`seq-protocol-data/README.md`](../seq-protocol-data/README.md) for the
