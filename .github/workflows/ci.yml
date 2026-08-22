@@ -30,14 +30,20 @@ jobs:
           # seq-decode's parsers against the test struct mirror — the pairing
           # --workspace never compiles.
           - backend: test
-            test: cargo test -p seq-decode --no-default-features --features backend-test
+            test: >-
+              cargo test -p seq-decode --no-default-features --features backend-test &&
+              cargo test -p seq-session --no-default-features --features backend-test &&
+              cargo test -p seq-bridge --no-default-features --features backend-test
             clippy: >-
-              cargo clippy -p seq-decode -p seq-bridge
+              cargo clippy -p seq-decode -p seq-session -p seq-bridge
               --no-default-features --features backend-test --all-targets
           - backend: eql
-            test: cargo test -p seq-backend-eql
+            test: >-
+              cargo test -p seq-backend-eql &&
+              cargo test -p seq-session --no-default-features --features backend-eql &&
+              cargo test -p seq-bridge --no-default-features --features backend-eql
             clippy: >-
-              cargo clippy -p seq-bridge
+              cargo clippy -p seq-backend-eql -p seq-session -p seq-bridge
               --no-default-features --features backend-eql --all-targets
     steps:
       - uses: actions/checkout@v5

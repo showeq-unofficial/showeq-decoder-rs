@@ -29,6 +29,16 @@ named for that event. `Stance` and `Invocation` share `named`; `Targeted` and
 tags have a same-named payload vector. This is the cxx-compatible
 tagged form from which the host can build an exhaustive `std::variant`.
 
+Entity events preserve native identities. `SpawnRenamed` carries an optional
+spawn id resolved by the ordered session. `Doors` and `GroundItem` never use
+spawn-id offsets or fabricated NPC types. Door zone-point sentinel values cross
+the bridge as `has_zone_point_id = false`. Modern Test zone-point records carry
+an actor name but no trigger or destination ids, so those ids remain optional
+across the bridge. EQL ground items likewise use `has_heading = false` because
+their wire record carries no heading. `CorpseLocated` and `ZonePoints` carry
+float coordinates. A host projector may round them or create compatibility ids
+when producing an older public format.
+
 Lifecycle batches have strict ordering. A reset caused by `OP_EnterWorld`, a
 profile, or a confirmed Live/Test zone transition precedes the event that
 caused it. `OP_NewZone` emits `ZoneChanged` followed by

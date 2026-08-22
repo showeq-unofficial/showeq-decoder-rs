@@ -6,8 +6,9 @@
 //! output stays byte-for-byte identical across the migration.
 
 use seq_events::{
-    heading_deg, Backend, Decoded, Dir, DoorInfo, Event, GuildInZone, GuildRosterMember,
-    ItemTemplate, Pos, ProfileInfo, SpawnInfo, ZoneEnvironment, ZoneInfo,
+    heading_deg, Backend, Decoded, Dir, DoorInfo, Event, GroundItemInfo, GuildInZone,
+    GuildRosterMember, ItemTemplate, Point3, Pos, ProfileInfo, SpawnInfo, ZoneEnvironment,
+    ZoneInfo, ZonePointInfo,
 };
 
 /// The Live/Test backend (shared `seq-decode` parsers).
@@ -20,11 +21,15 @@ impl Backend for LiveBackend {
 
     fn decode(&self, opcode: &str, dir: Dir, bytes: &[u8]) -> Decoded {
         match opcode {
-            "OP_ZoneEntry" => spawn(bytes),
+            "OP_ZoneEntry" if dir == Dir::ServerToClient => spawn(bytes),
+            "OP_ZoneEntry" => Decoded::Ignored,
             "OP_MobUpdate" => mob_update(bytes),
-            "OP_NpcMoveUpdate" => npc_move_update(bytes),
+            "OP_NpcMoveUpdate" if dir == Dir::ServerToClient => npc_move_update(bytes),
+            "OP_NpcMoveUpdate" => Decoded::Ignored,
             "OP_RemoveSpawn" => remove_spawn(bytes),
             "OP_DeleteSpawn" => delete_spawn(bytes),
+            "OP_SpawnRename" if dir == Dir::ServerToClient => spawn_rename(bytes),
+            "OP_SpawnRename" => Decoded::Ignored,
             "OP_HPUpdate" => hp_update(bytes),
             "OP_Death" => death(bytes),
             "OP_NewZone" if dir == Dir::ServerToClient => new_zone(bytes),
@@ -45,9 +50,15 @@ impl Backend for LiveBackend {
             "OP_SimpleMessage" => simple_message(bytes),
             "OP_FormattedMessage" => formatted_message(bytes),
             "OP_SpecialMesg" => special_message(bytes),
-            "OP_GroundSpawn" => ground_item(bytes),
+            "OP_GroundSpawn" if dir == Dir::ServerToClient => ground_item(bytes),
+            "OP_GroundSpawn" => Decoded::Ignored,
             "OP_ClickObject" => click_object(dir, bytes),
-            "OP_SpawnDoor" => doors(bytes),
+            "OP_SpawnDoor" if dir == Dir::ServerToClient => doors(bytes),
+            "OP_SpawnDoor" => Decoded::Ignored,
+            "OP_CorpseLocResponse" if dir == Dir::ServerToClient => corpse_location(bytes),
+            "OP_CorpseLocResponse" => Decoded::Ignored,
+            "OP_SendZonePoints" if dir == Dir::ServerToClient => zone_points(bytes),
+            "OP_SendZonePoints" => Decoded::Ignored,
             "OP_SpawnAppearance" => spawn_appearance(bytes),
             "OP_GuildsInZoneList" => guilds_in_zone_list(bytes),
             "OP_NewGuildInZone" => new_guild_in_zone(bytes),
@@ -134,6 +145,23 @@ fn delete_spawn(bytes: &[u8]) -> Decoded {
     match seq_decode::delete_spawn::parse_delete_spawn(bytes) {
         Ok(s) => Decoded::One(Event::SpawnRemoved { id: s.spawn_id }),
         Err(_) => Decoded::Malformed,
+    }
+}
+
+fn spawn_rename(bytes: &[u8]) -> Decoded {
+    match seq_decode::spawn_rename::parse_spawn_rename(bytes) {
+        Ok(rename)
+            if !rename.old_name.is_empty()
+                && rename.old_name == rename.old_name_again
+                && !rename.new_name.is_empty() =>
+        {
+            Decoded::One(Event::SpawnRenamed {
+                id: None,
+                old_name: rename.old_name,
+                new_name: rename.new_name,
+            })
+        }
+        Ok(_) | Err(_) => Decoded::Malformed,
     }
 }
 
@@ -330,16 +358,38 @@ fn player_profile(bytes: &[u8]) -> Decoded {
 }
 
 fn doors(bytes: &[u8]) -> Decoded {
-    let doors: Vec<DoorInfo> = bytes
-        .chunks(seq_decode::spawn_door::PAYLOAD_LEN)
-        .filter(|c| c.len() == seq_decode::spawn_door::PAYLOAD_LEN)
-        .filter_map(|c| seq_decode::spawn_door::parse_door(c).ok())
+    if bytes.len() % seq_decode::spawn_door::PAYLOAD_LEN != 0 {
+        return Decoded::Malformed;
+    }
+    let parsed = bytes
+        .chunks_exact(seq_decode::spawn_door::PAYLOAD_LEN)
+        .map(seq_decode::spawn_door::parse_door)
+        .collect::<Result<Vec<_>, _>>()
+        .expect("validated fixed-size door rows");
+    if parsed.iter().any(|door| {
+        ![door.x, door.y, door.z, door.heading]
+            .into_iter()
+            .all(f32::is_finite)
+    }) {
+        return Decoded::Malformed;
+    }
+    let doors: Vec<DoorInfo> = parsed
+        .into_iter()
         .map(|d| DoorInfo {
             id: u32::from(d.door_id),
             name: d.name,
-            x: d.x.round() as i32,
-            y: d.y.round() as i32,
-            z: d.z.round() as i32,
+            position: Point3 {
+                x: d.x,
+                y: d.y,
+                z: d.z,
+            },
+            heading: d.heading,
+            incline: d.incline,
+            size: d.size,
+            open_type: d.opentype,
+            state: d.spawnstate,
+            invert_state: d.invertstate,
+            zone_point_id: (d.zone_point != u32::MAX).then_some(d.zone_point),
         })
         .collect();
     Decoded::One(Event::Doors(doors))
@@ -421,19 +471,136 @@ fn illusion(bytes: &[u8]) -> Decoded {
     }
 }
 
-// OP_GroundSpawn: one ground object per packet. Coords truncate toward zero to
-// match the daemon's float→int position cast.
 fn ground_item(bytes: &[u8]) -> Decoded {
     match seq_decode::ground_spawn::parse_ground_spawn(bytes) {
-        Ok(g) => Decoded::One(Event::GroundItem {
-            drop_id: g.drop_id,
-            id_file: g.id_file,
-            x: g.x as i32,
-            y: g.y as i32,
-            z: g.z as i32,
-        }),
-        Err(_) => Decoded::Malformed,
+        Ok(g) if [g.x, g.y, g.z, g.heading].into_iter().all(f32::is_finite) => {
+            Decoded::One(Event::GroundItem(GroundItemInfo {
+                id: g.drop_id,
+                actor_definition: g.id_file,
+                position: Point3 {
+                    x: g.x,
+                    y: g.y,
+                    z: g.z,
+                },
+                heading: Some(g.heading),
+            }))
+        }
+        Ok(_) | Err(_) => Decoded::Malformed,
     }
+}
+
+fn corpse_location(bytes: &[u8]) -> Decoded {
+    match seq_decode::corpse_loc::parse_corpse_loc(bytes) {
+        Ok(corpse)
+            if [corpse.x, corpse.y, corpse.z]
+                .into_iter()
+                .all(f32::is_finite) =>
+        {
+            Decoded::One(Event::CorpseLocated {
+                id: corpse.spawn_id,
+                position: Point3 {
+                    x: corpse.x,
+                    y: corpse.y,
+                    z: corpse.z,
+                },
+            })
+        }
+        Ok(_) | Err(_) => Decoded::Malformed,
+    }
+}
+
+#[cfg(feature = "backend-live")]
+fn zone_points(bytes: &[u8]) -> Decoded {
+    let Some(count_bytes) = bytes.get(..4) else {
+        return Decoded::Malformed;
+    };
+    let count = u32::from_le_bytes(count_bytes.try_into().expect("four-byte slice")) as usize;
+    let Some(rows_len) = count.checked_mul(seq_decode::zone_point::PAYLOAD_LEN) else {
+        return Decoded::Malformed;
+    };
+    let Some(expected_len) = 4usize.checked_add(rows_len).and_then(|n| n.checked_add(24)) else {
+        return Decoded::Malformed;
+    };
+    if bytes.len() != expected_len {
+        return Decoded::Malformed;
+    }
+    let rows = &bytes[4..4 + rows_len];
+    let parsed = rows
+        .chunks_exact(seq_decode::zone_point::PAYLOAD_LEN)
+        .map(seq_decode::zone_point::parse_zone_point)
+        .collect::<Result<Vec<_>, _>>()
+        .expect("validated fixed-size zone-point rows");
+    if parsed.iter().any(|point| {
+        ![point.x, point.y, point.z, point.heading]
+            .into_iter()
+            .all(f32::is_finite)
+    }) {
+        return Decoded::Malformed;
+    }
+    let points = parsed
+        .into_iter()
+        .map(|point| ZonePointInfo {
+            trigger_id: Some(point.zone_trigger),
+            actor_definition: None,
+            position: Point3 {
+                x: point.x,
+                y: point.y,
+                z: point.z,
+            },
+            heading: point.heading,
+            destination_zone_id: Some(point.zone_id),
+            destination_instance_id: Some(point.zone_instance),
+        })
+        .collect();
+    Decoded::One(Event::ZonePoints(points))
+}
+
+#[cfg(feature = "backend-test")]
+fn zone_points(bytes: &[u8]) -> Decoded {
+    const RECORD_LEN: usize = 136;
+    const NAME_LEN: usize = 32;
+
+    if bytes.is_empty() || bytes.len() % RECORD_LEN != 0 {
+        return Decoded::Malformed;
+    }
+
+    let mut points = Vec::with_capacity(bytes.len() / RECORD_LEN);
+    for row in bytes.chunks_exact(RECORD_LEN) {
+        let name_bytes = &row[..NAME_LEN];
+        let Some(name_len) = name_bytes.iter().position(|byte| *byte == 0) else {
+            return Decoded::Malformed;
+        };
+        let name = &name_bytes[..name_len];
+        if name.is_empty() || !name.iter().all(|byte| byte.is_ascii_graphic()) {
+            return Decoded::Malformed;
+        }
+
+        let read_float =
+            |at: usize| f32::from_le_bytes(row[at..at + 4].try_into().expect("four-byte float"));
+        // The Test record retains the legacy map-frame y/x/z wire order.
+        let position = Point3 {
+            x: read_float(0x24),
+            y: read_float(0x20),
+            z: read_float(0x28),
+        };
+        let heading = read_float(0x2c);
+        if ![position.x, position.y, position.z, heading]
+            .into_iter()
+            .all(f32::is_finite)
+        {
+            return Decoded::Malformed;
+        }
+
+        points.push(ZonePointInfo {
+            trigger_id: None,
+            actor_definition: Some(String::from_utf8_lossy(name).into_owned()),
+            position,
+            heading,
+            destination_zone_id: None,
+            destination_instance_id: None,
+        });
+    }
+    Decoded::One(Event::ZonePoints(points))
 }
 
 // OP_ClickObject: dual-direction. The C>S side is the client's click request
@@ -643,6 +810,27 @@ mod tests {
     fn unknown_opcode_is_unhandled() {
         let d = LiveBackend.decode("OP_DoesNotExist", Dir::ServerToClient, &[]);
         assert_eq!(d, Decoded::Unhandled);
+    }
+
+    #[test]
+    fn entity_broadcasts_validate_direction_before_payload() {
+        let backend = LiveBackend;
+        assert_eq!(
+            backend.decode("OP_ZoneEntry", Dir::ClientToServer, &[]),
+            Decoded::Ignored
+        );
+        assert_eq!(
+            backend.decode("OP_NpcMoveUpdate", Dir::ClientToServer, &[]),
+            Decoded::Ignored
+        );
+        assert_eq!(
+            backend.decode("OP_SpawnDoor", Dir::ClientToServer, &[]),
+            Decoded::Ignored
+        );
+        assert_eq!(
+            backend.decode("OP_SendZonePoints", Dir::ClientToServer, &[]),
+            Decoded::Ignored
+        );
     }
 
     #[test]

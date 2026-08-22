@@ -17,7 +17,10 @@ use seq_backend_eql::{backend::EqlBackend, LootTracker, SelfTracker};
 #[cfg(any(feature = "backend-live", feature = "backend-test"))]
 use seq_backend_live::LiveBackend;
 use seq_events::{Backend, Decoded, SessionResetReason};
-use std::sync::Arc;
+use std::{
+    collections::{BTreeSet, HashMap},
+    sync::Arc,
+};
 
 #[cfg(feature = "backend-eql")]
 pub use seq_backend_eql::{LootRow, SelfStat};
@@ -123,6 +126,63 @@ pub struct Session {
     backend: BackendId,
     protocol_registry: Arc<ProtocolRegistry>,
     decoder: BackendSession,
+    entities: EntityIndex,
+}
+
+#[derive(Default)]
+struct EntityIndex {
+    names_by_id: HashMap<u32, String>,
+    ids_by_name: HashMap<String, BTreeSet<u32>>,
+    kinds_by_id: HashMap<u32, u8>,
+}
+
+impl EntityIndex {
+    fn add(&mut self, id: u32, name: &str, kind: u8) {
+        self.remove(id);
+        self.names_by_id.insert(id, name.to_owned());
+        self.kinds_by_id.insert(id, kind);
+        self.ids_by_name
+            .entry(name.to_owned())
+            .or_default()
+            .insert(id);
+    }
+
+    fn remove(&mut self, id: u32) {
+        self.kinds_by_id.remove(&id);
+        let Some(name) = self.names_by_id.remove(&id) else {
+            return;
+        };
+        let Some(ids) = self.ids_by_name.get_mut(&name) else {
+            return;
+        };
+        ids.remove(&id);
+        if ids.is_empty() {
+            self.ids_by_name.remove(&name);
+        }
+    }
+
+    fn unique_id(&self, name: &str) -> Option<u32> {
+        let ids = self.ids_by_name.get(name)?;
+        (ids.len() == 1).then(|| *ids.first().expect("one name-index entry"))
+    }
+
+    fn rename(&mut self, id: u32, new_name: &str) {
+        let kind = self.kinds_by_id.get(&id).copied().unwrap_or_default();
+        self.remove(id);
+        self.add(id, new_name, kind);
+    }
+
+    fn corpse_position(&self, id: u32, position: &mut seq_events::Point3) {
+        if matches!(self.kinds_by_id.get(&id), Some(0 | 2 | 10)) {
+            std::mem::swap(&mut position.x, &mut position.y);
+        }
+    }
+
+    fn clear(&mut self) {
+        self.names_by_id.clear();
+        self.ids_by_name.clear();
+        self.kinds_by_id.clear();
+    }
 }
 
 impl Session {
@@ -143,6 +203,7 @@ impl Session {
             backend: config.backend,
             protocol_registry: config.protocol_registry,
             decoder,
+            entities: EntityIndex::default(),
         }
     }
 
@@ -262,7 +323,7 @@ impl Session {
         };
 
         let mut output = Vec::with_capacity(events.len() + 1);
-        for event in events {
+        for mut event in events {
             let reset = match &event {
                 Event::EnterWorld { .. } => Some(SessionResetReason::EnterWorld),
                 Event::PlayerProfile(_) => Some(SessionResetReason::PlayerProfile),
@@ -276,6 +337,8 @@ impl Session {
                 output.push(Event::SessionReset { reason });
             }
 
+            self.apply_entity_semantics(&mut event);
+
             self.decoder
                 .observe_event(&event, opcode_name, direction, payload, timestamp);
             output.push(event);
@@ -283,7 +346,30 @@ impl Session {
         Decoded::Many(output)
     }
 
+    fn apply_entity_semantics(&mut self, event: &mut Event) {
+        match event {
+            Event::SpawnAdded(spawn) => self.entities.add(spawn.id, &spawn.name, spawn.npc),
+            Event::SpawnRemoved { id } => self.entities.remove(*id),
+            Event::SpawnRenamed {
+                id,
+                old_name,
+                new_name,
+            } => {
+                let resolved = self.entities.unique_id(old_name);
+                *id = resolved;
+                if let Some(resolved) = resolved {
+                    self.entities.rename(resolved, new_name);
+                }
+            }
+            Event::CorpseLocated { id, position } => {
+                self.entities.corpse_position(*id, position);
+            }
+            _ => {}
+        }
+    }
+
     fn reset_correlations(&mut self) {
+        self.entities.clear();
         match &mut self.decoder {
             #[cfg(feature = "backend-eql")]
             BackendSession::Eql(state) => {
@@ -801,5 +887,38 @@ mod tests {
         assert!(session.take_loot_rows().is_empty());
         assert!(session.flush(FlushReason::ReplayEnd).is_empty());
         assert_eq!(session.take_loot_rows().len(), 1);
+    }
+
+    #[test]
+    fn corpse_coordinates_follow_entity_kind() {
+        for kind in [0, 2, 10] {
+            let mut entities = EntityIndex::default();
+            entities.add(99, "Firona", kind);
+            let mut position = seq_events::Point3 {
+                x: 4.25,
+                y: 5.5,
+                z: 6.75,
+            };
+            entities.corpse_position(99, &mut position);
+            assert_eq!(
+                position,
+                seq_events::Point3 {
+                    x: 5.5,
+                    y: 4.25,
+                    z: 6.75,
+                }
+            );
+        }
+
+        let mut entities = EntityIndex::default();
+        entities.add(100, "a rat", 1);
+        let mut position = seq_events::Point3 {
+            x: 4.25,
+            y: 5.5,
+            z: 6.75,
+        };
+        entities.corpse_position(100, &mut position);
+        assert_eq!(position.x, 4.25);
+        assert_eq!(position.y, 5.5);
     }
 }

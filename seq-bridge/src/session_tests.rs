@@ -1,7 +1,8 @@
 use super::*;
 use seq_events::{
-    BuffEntry, DoorInfo, Event, GuildInZone, GuildRosterMember, ItemTemplate, LootItemInfo, Pos,
-    ProfileInfo, SessionResetReason, SpawnInfo, ZoneEnvironment, ZoneInfo,
+    BuffEntry, DoorInfo, Event, GroundItemInfo, GuildInZone, GuildRosterMember, ItemTemplate,
+    LootItemInfo, Point3, Pos, ProfileInfo, SessionResetReason, SpawnInfo, ZoneEnvironment,
+    ZoneInfo, ZonePointInfo,
 };
 
 fn pos(seed: i32) -> Pos {
@@ -10,6 +11,14 @@ fn pos(seed: i32) -> Pos {
         y: seed + 1,
         z: seed + 2,
         heading_deg: (seed + 3) as u16,
+    }
+}
+
+fn point3(seed: f32) -> Point3 {
+    Point3 {
+        x: seed,
+        y: seed + 0.25,
+        z: seed + 0.5,
     }
 }
 
@@ -109,9 +118,14 @@ fn door() -> DoorInfo {
     DoorInfo {
         id: 90,
         name: "door".into(),
-        x: -91,
-        y: 92,
-        z: -93,
+        position: point3(-91.0),
+        heading: 92.5,
+        incline: 93,
+        size: 94,
+        open_type: 95,
+        state: 96,
+        invert_state: 97,
+        zone_point_id: Some(98),
     }
 }
 
@@ -149,6 +163,11 @@ fn canonical_events() -> Vec<Event> {
             pos: pos(121),
         },
         Event::SpawnRemoved { id: 130 },
+        Event::SpawnRenamed {
+            id: Some(130),
+            old_name: "old spawn".into(),
+            new_name: "new spawn".into(),
+        },
         Event::SpawnKilled {
             deceased_id: 131,
             killer_id: 132,
@@ -252,13 +271,34 @@ fn canonical_events() -> Vec<Event> {
         },
         Event::Doors(vec![door()]),
         Event::GroundItemRemoved { drop_id: 200 },
-        Event::GroundItem {
-            drop_id: 201,
-            id_file: "IT1_ACTORDEF".into(),
-            x: -202,
-            y: 203,
-            z: -204,
+        Event::GroundItem(GroundItemInfo {
+            id: 201,
+            actor_definition: "IT1_ACTORDEF".into(),
+            position: point3(-202.0),
+            heading: Some(203.5),
+        }),
+        Event::CorpseLocated {
+            id: 204,
+            position: point3(-205.0),
         },
+        Event::ZonePoints(vec![
+            ZonePointInfo {
+                trigger_id: Some(206),
+                actor_definition: Some("POKCABPORT500".into()),
+                position: point3(207.0),
+                heading: 208.5,
+                destination_zone_id: Some(209),
+                destination_instance_id: Some(210),
+            },
+            ZonePointInfo {
+                trigger_id: None,
+                actor_definition: None,
+                position: point3(211.0),
+                heading: 212.5,
+                destination_zone_id: None,
+                destination_instance_id: None,
+            },
+        ]),
         Event::Combat {
             source: 210,
             target: 211,
@@ -367,6 +407,14 @@ fn unpos(pos: &ffi::EventPos) -> Pos {
         y: pos.y,
         z: pos.z,
         heading_deg: pos.heading_deg,
+    }
+}
+
+fn unpoint3(point: &ffi::EventPoint3) -> Point3 {
+    Point3 {
+        x: point.x,
+        y: point.y,
+        z: point.z,
     }
 }
 
@@ -496,6 +544,14 @@ fn reconstruct(batch: &ffi::SessionDecodeBatch) -> Vec<Event> {
                 ffi::SessionEventKind::SpawnRemoved => Event::SpawnRemoved {
                     id: batch.spawn_removed[i].id,
                 },
+                ffi::SessionEventKind::SpawnRenamed => {
+                    let p = &batch.spawn_renamed[i];
+                    Event::SpawnRenamed {
+                        id: p.has_id.then_some(p.id),
+                        old_name: p.old_name.clone(),
+                        new_name: p.new_name.clone(),
+                    }
+                }
                 ffi::SessionEventKind::SpawnKilled => {
                     let p = &batch.spawn_killed[i];
                     Event::SpawnKilled {
@@ -656,9 +712,14 @@ fn reconstruct(batch: &ffi::SessionDecodeBatch) -> Vec<Event> {
                         .map(|p| DoorInfo {
                             id: p.id,
                             name: p.name.clone(),
-                            x: p.x,
-                            y: p.y,
-                            z: p.z,
+                            position: unpoint3(&p.position),
+                            heading: p.heading,
+                            incline: p.incline,
+                            size: p.size,
+                            open_type: p.open_type,
+                            state: p.state,
+                            invert_state: p.invert_state,
+                            zone_point_id: p.has_zone_point_id.then_some(p.zone_point_id),
                         })
                         .collect(),
                 ),
@@ -667,14 +728,40 @@ fn reconstruct(batch: &ffi::SessionDecodeBatch) -> Vec<Event> {
                 },
                 ffi::SessionEventKind::GroundItem => {
                     let p = &batch.ground_item[i];
-                    Event::GroundItem {
-                        drop_id: p.drop_id,
-                        id_file: p.id_file.clone(),
-                        x: p.x,
-                        y: p.y,
-                        z: p.z,
+                    Event::GroundItem(GroundItemInfo {
+                        id: p.id,
+                        actor_definition: p.actor_definition.clone(),
+                        position: unpoint3(&p.position),
+                        heading: p.has_heading.then_some(p.heading),
+                    })
+                }
+                ffi::SessionEventKind::CorpseLocated => {
+                    let p = &batch.corpse_located[i];
+                    Event::CorpseLocated {
+                        id: p.id,
+                        position: unpoint3(&p.position),
                     }
                 }
+                ffi::SessionEventKind::ZonePoints => Event::ZonePoints(
+                    batch.zone_points[i]
+                        .points
+                        .iter()
+                        .map(|p| ZonePointInfo {
+                            trigger_id: p.has_trigger_id.then_some(p.trigger_id),
+                            actor_definition: p
+                                .has_actor_definition
+                                .then(|| p.actor_definition.clone()),
+                            position: unpoint3(&p.position),
+                            heading: p.heading,
+                            destination_zone_id: p
+                                .has_destination_zone_id
+                                .then_some(p.destination_zone_id),
+                            destination_instance_id: p
+                                .has_destination_instance_id
+                                .then_some(p.destination_instance_id),
+                        })
+                        .collect(),
+                ),
                 ffi::SessionEventKind::Combat => {
                     let p = &batch.combat[i];
                     Event::Combat {

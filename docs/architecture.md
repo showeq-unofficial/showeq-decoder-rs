@@ -209,6 +209,30 @@ attribution only (it makes vitals land while the player stands still).
 `Event::SelfPos` carries `spawn_id` for exactly this — don't pin a player to
 it directly.
 
+## Entity identity and spatial state
+
+The Rust session keeps a small entity-name index for `OP_SpawnRename`. A rename
+gets a spawn id only when exactly one active spawn has the old name. Attachments
+that start mid-zone and duplicate names produce `id: None`; they never invent a
+sentinel id. Lifecycle resets clear the index before later events in the batch.
+
+Doors and ground items keep their server ids in separate namespaces. The shared
+events do not offset those ids or represent either object as a spawn. Door
+`zonePoint == 0xffff_ffff` becomes `None`. Door, ground-item, corpse, and
+zone-point coordinates stay as finite `f32` values. Modern Test zone points
+retain their portal/object actor name and leave the absent trigger and
+destination ids as `None`. Host projectors own any rounding, name resolution,
+and synthetic ids required by seq.v1 compatibility.
+
+Live ground items retain the full actor-definition string and their wire
+heading. EQL ground records carry no heading, so the event uses `None` rather
+than fabricating zero. A fixed-width host buffer owns its own truncation.
+
+`OP_CorpseLocResponse` has an old PC-coordinate quirk. When the session knows
+the entity is a player or player corpse, it swaps the two horizontal wire fields
+before emitting `CorpseLocated`. Unknown mid-session corpses retain the parser's
+map-frame reading rather than disappearing.
+
 ## Why quality gates are per-backend, not workspace-wide
 
 `cargo test --workspace` builds every crate with its DEFAULT features, so

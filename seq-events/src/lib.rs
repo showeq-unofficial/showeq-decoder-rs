@@ -29,6 +29,18 @@ pub struct Pos {
     pub heading_deg: u16,
 }
 
+/// A precise world-space point for packets whose wire coordinates are floats.
+///
+/// Host projectors may round these values for an older public contract. Rust
+/// keeps the decoded coordinates so that compatibility policy does not become
+/// shared game state.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Point3 {
+    pub x: f32,
+    pub y: f32,
+    pub z: f32,
+}
+
 /// A spawn (NPC, PC, or corpse) entering the zone.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SpawnInfo {
@@ -243,13 +255,51 @@ pub struct GuildRosterMember {
 }
 
 /// A single door / static object row from OP_SpawnDoor.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct DoorInfo {
     pub id: u32,
     pub name: String,
-    pub x: i32,
-    pub y: i32,
-    pub z: i32,
+    pub position: Point3,
+    /// Native door heading. Unlike mobile-spawn headings, this field is already
+    /// a float and has not been proven to use the same bit-scaled convention.
+    pub heading: f32,
+    pub incline: u32,
+    pub size: u32,
+    pub open_type: u8,
+    pub state: u8,
+    pub invert_state: u8,
+    /// `None` replaces the wire's `0xffff_ffff` "not a zone line" sentinel.
+    pub zone_point_id: Option<u32>,
+}
+
+/// A ground object or dropped item in its native identity namespace.
+#[derive(Debug, Clone, PartialEq)]
+pub struct GroundItemInfo {
+    pub id: u32,
+    /// Actor-definition model name. Resolving it to an item display name needs
+    /// the item database and belongs in a host projection or later correlation.
+    pub actor_definition: String,
+    pub position: Point3,
+    /// Native heading when present. EQL ground records carry no heading.
+    pub heading: Option<f32>,
+}
+
+/// One destination trigger from `OP_SendZonePoints`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ZonePointInfo {
+    /// Wire trigger id. Modern Test records identify the portal by actor name
+    /// instead and therefore leave this absent.
+    pub trigger_id: Option<u32>,
+    /// Test portal/object actor name. Live and EQL counted records do not carry
+    /// one.
+    pub actor_definition: Option<String>,
+    pub position: Point3,
+    pub heading: f32,
+    /// Destination ids are absent from modern Test records. A compatibility
+    /// projector may resolve the actor name, but the shared event does not
+    /// invent zero-valued ids.
+    pub destination_zone_id: Option<u16>,
+    pub destination_instance_id: Option<u16>,
 }
 
 /// A decoded, backend-neutral world event.
@@ -264,6 +314,15 @@ pub enum Event {
     SpawnMoved { id: u32, pos: Pos },
     /// A spawn left the zone (OP_RemoveSpawn / OP_DeleteSpawn).
     SpawnRemoved { id: u32 },
+    /// A spawn changed its server-provided display name. `id` is present when
+    /// the ordered session saw one unambiguous matching spawn first. A
+    /// mid-session attachment or duplicate old names leave it absent rather
+    /// than inventing an id.
+    SpawnRenamed {
+        id: Option<u32>,
+        old_name: String,
+        new_name: String,
+    },
     /// A spawn died (OP_Death). Unlike SpawnRemoved the body stays as a corpse;
     /// the consumer keeps it in its spawn map. `killer_id` 0 = no killer / self.
     /// The consumer owns the self-death special case (it knows the player id).
@@ -428,23 +487,22 @@ pub enum Event {
         class: u32,
         race: u32,
     },
-    /// A batch of doors / static objects (OP_SpawnDoor).
+    /// The authoritative door/static-object set from OP_SpawnDoor. Door ids
+    /// remain in their own namespace. A host projector creates any compatibility
+    /// id used to merge them into a protobuf spawn list.
     Doors(Vec<DoorInfo>),
     /// A ground item was picked up / removed (OP_ClickObject, S>C removal side —
     /// the C>S click request is ignored). `drop_id` matches the GroundItem's
     /// drop_id; the consumer removes the drop it rendered for that id.
     GroundItemRemoved { drop_id: u32 },
-    /// A ground item / static placeable (OP_GroundSpawn). The daemon renders it
-    /// as a DROP-type spawn (it keeps a separate drop map; a single-map consumer
-    /// offsets the id like doors). `id_file` is the actorDef model string —
-    /// resolving it to a real item name needs the item DB (deferred).
-    GroundItem {
-        drop_id: u32,
-        id_file: String,
-        x: i32,
-        y: i32,
-        z: i32,
-    },
+    /// A ground item or static placeable (OP_GroundSpawn). It remains a ground
+    /// entity here, not a fabricated spawn with a host-specific NPC type.
+    GroundItem(GroundItemInfo),
+    /// A corpse-location response. This is distinct from ordinary movement:
+    /// the packet confirms the entity is a stationary corpse.
+    CorpseLocated { id: u32, position: Point3 },
+    /// The authoritative zone-point set from OP_SendZonePoints.
+    ZonePoints(Vec<ZonePointInfo>),
     /// A damage event (OP_Action2). Ids only; the consumer resolves names from
     /// its spawn map. `kind` is the wire damage type; `spell_id` 0 = melee.
     Combat {

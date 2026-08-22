@@ -881,6 +881,9 @@ mod ffi {
         SessionReset = 49,
         ZoneTransition = 50,
         ZoneEnvironmentChanged = 51,
+        SpawnRenamed = 52,
+        CorpseLocated = 53,
+        ZonePoints = 54,
     }
 
     struct SessionEventRef {
@@ -892,6 +895,11 @@ mod ffi {
         y: i32,
         z: i32,
         heading_deg: u16,
+    }
+    struct EventPoint3 {
+        x: f32,
+        y: f32,
+        z: f32,
     }
     struct EventSpawnInfo {
         id: u32,
@@ -975,9 +983,15 @@ mod ffi {
     struct EventDoorInfo {
         id: u32,
         name: String,
-        x: i32,
-        y: i32,
-        z: i32,
+        position: EventPoint3,
+        heading: f32,
+        incline: u32,
+        size: u32,
+        open_type: u8,
+        state: u8,
+        invert_state: u8,
+        has_zone_point_id: bool,
+        zone_point_id: u32,
     }
     struct EventLootItemInfo {
         name: String,
@@ -993,6 +1007,12 @@ mod ffi {
     struct EventSpawnMoved {
         id: u32,
         pos: EventPos,
+    }
+    struct EventSpawnRenamed {
+        has_id: bool,
+        id: u32,
+        old_name: String,
+        new_name: String,
     }
     struct EventSpawnId {
         id: u32,
@@ -1111,11 +1131,30 @@ mod ffi {
         drop_id: u32,
     }
     struct EventGroundItem {
-        drop_id: u32,
-        id_file: String,
-        x: i32,
-        y: i32,
-        z: i32,
+        id: u32,
+        actor_definition: String,
+        position: EventPoint3,
+        has_heading: bool,
+        heading: f32,
+    }
+    struct EventCorpseLocated {
+        id: u32,
+        position: EventPoint3,
+    }
+    struct EventZonePointInfo {
+        has_trigger_id: bool,
+        trigger_id: u32,
+        has_actor_definition: bool,
+        actor_definition: String,
+        position: EventPoint3,
+        heading: f32,
+        has_destination_zone_id: bool,
+        destination_zone_id: u16,
+        has_destination_instance_id: bool,
+        destination_instance_id: u16,
+    }
+    struct EventZonePoints {
+        points: Vec<EventZonePointInfo>,
     }
     struct EventCombat {
         source: u32,
@@ -1222,6 +1261,7 @@ mod ffi {
         spawn_added: Vec<EventSpawnInfo>,
         spawn_moved: Vec<EventSpawnMoved>,
         spawn_removed: Vec<EventSpawnId>,
+        spawn_renamed: Vec<EventSpawnRenamed>,
         spawn_killed: Vec<EventSpawnKilled>,
         spawn_hp: Vec<EventSpawnHp>,
         stat_sync: Vec<EventStatSync>,
@@ -1247,6 +1287,8 @@ mod ffi {
         doors: Vec<EventDoors>,
         ground_item_removed: Vec<EventGroundItemRemoved>,
         ground_item: Vec<EventGroundItem>,
+        corpse_located: Vec<EventCorpseLocated>,
+        zone_points: Vec<EventZonePoints>,
         combat: Vec<EventCombat>,
         spawn_cast: Vec<EventSpawnCast>,
         spawn_id: Vec<EventSpawnId>,
@@ -1636,6 +1678,14 @@ fn event_pos(pos: seq_events::Pos) -> ffi::EventPos {
     }
 }
 
+fn event_point3(point: seq_events::Point3) -> ffi::EventPoint3 {
+    ffi::EventPoint3 {
+        x: point.x,
+        y: point.y,
+        z: point.z,
+    }
+}
+
 fn event_spawn_info(spawn: seq_events::SpawnInfo) -> ffi::EventSpawnInfo {
     let (has_max_hp, max_hp) = match spawn.max_hp {
         Some(max_hp) => (true, max_hp),
@@ -1750,9 +1800,30 @@ fn event_door(door: seq_events::DoorInfo) -> ffi::EventDoorInfo {
     ffi::EventDoorInfo {
         id: door.id,
         name: door.name,
-        x: door.x,
-        y: door.y,
-        z: door.z,
+        position: event_point3(door.position),
+        heading: door.heading,
+        incline: door.incline,
+        size: door.size,
+        open_type: door.open_type,
+        state: door.state,
+        invert_state: door.invert_state,
+        has_zone_point_id: door.zone_point_id.is_some(),
+        zone_point_id: door.zone_point_id.unwrap_or_default(),
+    }
+}
+
+fn event_zone_point(point: seq_events::ZonePointInfo) -> ffi::EventZonePointInfo {
+    ffi::EventZonePointInfo {
+        has_trigger_id: point.trigger_id.is_some(),
+        trigger_id: point.trigger_id.unwrap_or_default(),
+        has_actor_definition: point.actor_definition.is_some(),
+        actor_definition: point.actor_definition.unwrap_or_default(),
+        position: event_point3(point.position),
+        heading: point.heading,
+        has_destination_zone_id: point.destination_zone_id.is_some(),
+        destination_zone_id: point.destination_zone_id.unwrap_or_default(),
+        has_destination_instance_id: point.destination_instance_id.is_some(),
+        destination_instance_id: point.destination_instance_id.unwrap_or_default(),
     }
 }
 
@@ -1826,6 +1897,20 @@ fn translate_event(batch: &mut ffi::SessionDecodeBatch, event: seq_events::Event
             let index = batch.spawn_removed.len();
             batch.spawn_removed.push(ffi::EventSpawnId { id });
             push_ref(batch, ffi::SessionEventKind::SpawnRemoved, index);
+        }
+        Event::SpawnRenamed {
+            id,
+            old_name,
+            new_name,
+        } => {
+            let index = batch.spawn_renamed.len();
+            batch.spawn_renamed.push(ffi::EventSpawnRenamed {
+                has_id: id.is_some(),
+                id: id.unwrap_or_default(),
+                old_name,
+                new_name,
+            });
+            push_ref(batch, ffi::SessionEventKind::SpawnRenamed, index);
         }
         Event::SpawnKilled {
             deceased_id,
@@ -2072,22 +2157,31 @@ fn translate_event(batch: &mut ffi::SessionDecodeBatch, event: seq_events::Event
                 .push(ffi::EventGroundItemRemoved { drop_id });
             push_ref(batch, ffi::SessionEventKind::GroundItemRemoved, index);
         }
-        Event::GroundItem {
-            drop_id,
-            id_file,
-            x,
-            y,
-            z,
-        } => {
+        Event::GroundItem(item) => {
             let index = batch.ground_item.len();
             batch.ground_item.push(ffi::EventGroundItem {
-                drop_id,
-                id_file,
-                x,
-                y,
-                z,
+                id: item.id,
+                actor_definition: item.actor_definition,
+                position: event_point3(item.position),
+                has_heading: item.heading.is_some(),
+                heading: item.heading.unwrap_or_default(),
             });
             push_ref(batch, ffi::SessionEventKind::GroundItem, index);
+        }
+        Event::CorpseLocated { id, position } => {
+            let index = batch.corpse_located.len();
+            batch.corpse_located.push(ffi::EventCorpseLocated {
+                id,
+                position: event_point3(position),
+            });
+            push_ref(batch, ffi::SessionEventKind::CorpseLocated, index);
+        }
+        Event::ZonePoints(points) => {
+            let index = batch.zone_points.len();
+            batch.zone_points.push(ffi::EventZonePoints {
+                points: points.into_iter().map(event_zone_point).collect(),
+            });
+            push_ref(batch, ffi::SessionEventKind::ZonePoints, index);
         }
         Event::Combat {
             source,
@@ -2341,6 +2435,7 @@ fn empty_session_batch(
         spawn_added: Vec::new(),
         spawn_moved: Vec::new(),
         spawn_removed: Vec::new(),
+        spawn_renamed: Vec::new(),
         spawn_killed: Vec::new(),
         spawn_hp: Vec::new(),
         stat_sync: Vec::new(),
@@ -2366,6 +2461,8 @@ fn empty_session_batch(
         doors: Vec::new(),
         ground_item_removed: Vec::new(),
         ground_item: Vec::new(),
+        corpse_located: Vec::new(),
+        zone_points: Vec::new(),
         combat: Vec::new(),
         spawn_cast: Vec::new(),
         spawn_id: Vec::new(),
