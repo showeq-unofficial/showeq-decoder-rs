@@ -904,6 +904,14 @@ mod ffi {
         z: i32,
         heading_deg: u16,
     }
+    struct EventVelocity {
+        has_x: bool,
+        x: i32,
+        has_y: bool,
+        y: i32,
+        has_z: bool,
+        z: i32,
+    }
     struct EventPoint3 {
         x: f32,
         y: f32,
@@ -983,6 +991,13 @@ mod ffi {
         class_mask: u32,
         has_pos: bool,
         pos: EventPos,
+        velocity: EventVelocity,
+        has_delta_heading: bool,
+        delta_heading: i16,
+        has_animation: bool,
+        animation: i16,
+        has_equipment_models: bool,
+        equipment_models: Vec<u32>,
     }
     struct EventProfileInfo {
         name: String,
@@ -1072,6 +1087,11 @@ mod ffi {
     struct EventSpawnMoved {
         id: u32,
         pos: EventPos,
+        velocity: EventVelocity,
+        has_delta_heading: bool,
+        delta_heading: i16,
+        has_animation: bool,
+        animation: i16,
     }
     struct EventSpawnRenamed {
         has_id: bool,
@@ -1107,6 +1127,11 @@ mod ffi {
     struct EventSelfPos {
         pos: EventPos,
         spawn_id: u32,
+        velocity: EventVelocity,
+        has_delta_heading: bool,
+        delta_heading: i16,
+        has_animation: bool,
+        animation: i16,
     }
     struct EventSpawnAnimation {
         spawn_id: u32,
@@ -1785,6 +1810,17 @@ fn event_point3(point: seq_events::Point3) -> ffi::EventPoint3 {
     }
 }
 
+fn event_velocity(velocity: seq_events::Velocity) -> ffi::EventVelocity {
+    ffi::EventVelocity {
+        has_x: velocity.x.is_some(),
+        x: velocity.x.unwrap_or_default(),
+        has_y: velocity.y.is_some(),
+        y: velocity.y.unwrap_or_default(),
+        has_z: velocity.z.is_some(),
+        z: velocity.z.unwrap_or_default(),
+    }
+}
+
 fn event_spawn_info(spawn: seq_events::SpawnInfo) -> ffi::EventSpawnInfo {
     let (has_max_hp, max_hp) = match spawn.max_hp {
         Some(max_hp) => (true, max_hp),
@@ -1819,6 +1855,13 @@ fn event_spawn_info(spawn: seq_events::SpawnInfo) -> ffi::EventSpawnInfo {
         class_mask: spawn.class_mask,
         has_pos,
         pos,
+        velocity: event_velocity(spawn.velocity),
+        has_delta_heading: spawn.delta_heading.is_some(),
+        delta_heading: spawn.delta_heading.unwrap_or_default(),
+        has_animation: spawn.animation.is_some(),
+        animation: spawn.animation.unwrap_or_default(),
+        has_equipment_models: spawn.equipment_models.is_some(),
+        equipment_models: spawn.equipment_models.map_or_else(Vec::new, <[_; 9]>::into),
     }
 }
 
@@ -2071,11 +2114,22 @@ fn translate_event(batch: &mut ffi::SessionDecodeBatch, event: seq_events::Event
             batch.spawn_added.push(event_spawn_info(spawn));
             push_ref(batch, ffi::SessionEventKind::SpawnAdded, index);
         }
-        Event::SpawnMoved { id, pos } => {
+        Event::SpawnMoved {
+            id,
+            pos,
+            velocity,
+            delta_heading,
+            animation,
+        } => {
             let index = batch.spawn_moved.len();
             batch.spawn_moved.push(ffi::EventSpawnMoved {
                 id,
                 pos: event_pos(pos),
+                velocity: event_velocity(velocity),
+                has_delta_heading: delta_heading.is_some(),
+                delta_heading: delta_heading.unwrap_or_default(),
+                has_animation: animation.is_some(),
+                animation: animation.unwrap_or_default(),
             });
             push_ref(batch, ffi::SessionEventKind::SpawnMoved, index);
         }
@@ -2143,11 +2197,22 @@ fn translate_event(batch: &mut ffi::SessionDecodeBatch, event: seq_events::Event
             });
             push_ref(batch, ffi::SessionEventKind::StatSync, index);
         }
-        Event::SelfPos { pos, spawn_id } => {
+        Event::SelfPos {
+            pos,
+            spawn_id,
+            velocity,
+            delta_heading,
+            animation,
+        } => {
             let index = batch.self_pos.len();
             batch.self_pos.push(ffi::EventSelfPos {
                 pos: event_pos(pos),
                 spawn_id,
+                velocity: event_velocity(velocity),
+                has_delta_heading: delta_heading.is_some(),
+                delta_heading: delta_heading.unwrap_or_default(),
+                has_animation: animation.is_some(),
+                animation: animation.unwrap_or_default(),
             });
             push_ref(batch, ffi::SessionEventKind::SelfPos, index);
         }

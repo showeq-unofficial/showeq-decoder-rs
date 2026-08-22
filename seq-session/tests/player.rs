@@ -1,3 +1,5 @@
+#[cfg(any(feature = "backend-live", feature = "backend-test"))]
+use seq_events::Velocity;
 use seq_events::{Event, PlayerAppearance, PlayerVitals, Pos, VitalValue};
 use seq_session::{
     BackendId, DecodeDisposition, Dir, OpcodeId, ProtocolRegistry, Session, SessionConfig,
@@ -114,6 +116,17 @@ fn live_self_pos(id: u16, x: f32, y: f32, z: f32) -> [u8; 42] {
 }
 
 #[cfg(any(feature = "backend-live", feature = "backend-test"))]
+fn live_controlled_spawn_pos(id: u16) -> [u8; 42] {
+    let mut payload = live_self_pos(id, 10.0, 20.0, 30.0);
+    payload[6..10].copy_from_slice(&12u32.to_le_bytes());
+    payload[14..18].copy_from_slice(&4.75f32.to_le_bytes());
+    payload[22..26].copy_from_slice(&(0x3ffu32 - 6).to_le_bytes());
+    payload[26..30].copy_from_slice(&9.5f32.to_le_bytes());
+    payload[34..38].copy_from_slice(&(-5.25f32).to_le_bytes());
+    payload
+}
+
+#[cfg(any(feature = "backend-live", feature = "backend-test"))]
 fn live_hp(id: u16, current: i32, maximum: i32) -> [u8; 18] {
     let mut payload = [0; 18];
     payload[..2].copy_from_slice(&id.to_le_bytes());
@@ -140,9 +153,16 @@ fn assert_live_trace(backend: BackendId) {
         Dir::ServerToClient,
         &live_spawn("Firona", 100),
     );
-    assert!(
-        matches!(identity.as_slice(), [Event::PlayerIdentityUpdated(i)] if i.spawn_id == Some(100))
-    );
+    assert!(matches!(
+        identity.as_slice(),
+        [Event::PlayerIdentityUpdated(i), Event::PlayerMoved { spawn_id: Some(100), pos }]
+            if i.spawn_id == Some(100) && *pos == Pos {
+                x: 0,
+                y: 0,
+                z: 0,
+                heading_deg: 0,
+            }
+    ));
 
     assert!(matches!(
         decode(
@@ -155,6 +175,32 @@ fn assert_live_trace(backend: BackendId) {
         .as_slice(),
         [Event::SpawnAdded(spawn)] if spawn.id == 200
     ));
+
+    assert_eq!(
+        decode(
+            &mut session,
+            StreamKind::Zone,
+            CLIENT_UPDATE,
+            Dir::ServerToClient,
+            &live_controlled_spawn_pos(200),
+        ),
+        vec![Event::SpawnMoved {
+            id: 200,
+            pos: Pos {
+                x: 10,
+                y: 20,
+                z: 30,
+                heading_deg: 0,
+            },
+            velocity: Velocity {
+                x: Some(4),
+                y: Some(-5),
+                z: Some(9),
+            },
+            delta_heading: Some(-7),
+            animation: Some(12),
+        }]
+    );
 
     assert_eq!(
         decode(

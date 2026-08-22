@@ -452,9 +452,21 @@ impl Session {
                 ]
             }
             Event::SpawnAdded(spawn) => self.apply_spawn_identity(spawn, opcode_name),
-            Event::SelfPos { pos, spawn_id } => {
+            Event::SelfPos {
+                pos,
+                spawn_id,
+                velocity,
+                delta_heading,
+                animation,
+            } => {
                 if direction != Dir::ClientToServer {
-                    return vec![Event::SpawnMoved { id: spawn_id, pos }];
+                    return vec![Event::SpawnMoved {
+                        id: spawn_id,
+                        pos,
+                        velocity,
+                        delta_heading,
+                        animation,
+                    }];
                 }
 
                 #[cfg(feature = "backend-eql")]
@@ -1359,6 +1371,10 @@ mod tests {
             guild_server_id: 0,
             class_mask: 4,
             pos: None,
+            velocity: seq_events::Velocity::default(),
+            delta_heading: None,
+            animation: None,
+            equipment_models: None,
         };
         session.apply_session_semantics(
             Decoded::One(Event::SpawnAdded(spawn)),

@@ -229,6 +229,14 @@ Live ground items retain the full actor-definition string and their wire
 heading. EQL ground records carry no heading, so the event uses `None` rather
 than fabricating zero. A fixed-width host buffer owns its own truncation.
 
+Entity motion follows the same rule. `SpawnMoved` carries optional velocity
+components, heading delta, and animation in addition to its required absolute
+position. The compact movement wire may omit each of those facts. Live
+`SpawnAdded` also carries its decoded initial position, motion, and nine visual
+equipment model ids. EQL leaves motion and equipment absent until its wire
+layout is validated. Hosts may project absent values as zero for an older
+public contract, but zero and absent remain distinct in the shared event.
+
 `OP_CorpseLocResponse` has an old PC-coordinate quirk. When the session knows
 the entity is a player or player corpse, it swaps the two horizontal wire fields
 before emitting `CorpseLocated`. Unknown mid-session corpses retain the parser's

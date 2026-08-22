@@ -47,6 +47,11 @@ pub struct NpcMoveUpdate {
     pub delta_z: i16,
     pub delta_heading: i8,
     pub animation: i16,
+    pub has_delta_x: bool,
+    pub has_delta_y: bool,
+    pub has_delta_z: bool,
+    pub has_delta_heading: bool,
+    pub has_animation: bool,
 }
 
 #[derive(Debug, Error, PartialEq, Eq)]
@@ -187,6 +192,11 @@ pub fn parse_npc_move_update(bytes: &[u8]) -> Result<NpcMoveUpdate, NpcMoveUpdat
         delta_z,
         delta_heading,
         animation,
+        has_delta_x: field_specifier & MASK_DELTA_X != 0,
+        has_delta_y: field_specifier & MASK_DELTA_Y != 0,
+        has_delta_z: field_specifier & MASK_DELTA_Z != 0,
+        has_delta_heading: field_specifier & MASK_DELTA_HEADING != 0,
+        has_animation: field_specifier & MASK_ANIMATION != 0,
     })
 }
 
@@ -240,5 +250,10 @@ mod tests {
         assert_eq!(r.z, 0);
         assert_eq!(r.heading, 0);
         assert_eq!(r.delta_x, 0);
+        assert!(!r.has_delta_x);
+        assert!(!r.has_delta_y);
+        assert!(!r.has_delta_z);
+        assert!(!r.has_delta_heading);
+        assert!(!r.has_animation);
     }
 }

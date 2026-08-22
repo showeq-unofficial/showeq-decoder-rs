@@ -11,7 +11,7 @@
 
 use seq_events::{
     heading_deg, Backend, BuffEntry, Decoded, Dir, DoorInfo, Event, GroundItemInfo,
-    GuildRosterMember, ItemTemplate, LootItemInfo, Point3, Pos, ProfileInfo, SpawnInfo,
+    GuildRosterMember, ItemTemplate, LootItemInfo, Point3, Pos, ProfileInfo, SpawnInfo, Velocity,
     ZoneEnvironment, ZoneInfo, ZonePointInfo,
 };
 
@@ -150,6 +150,10 @@ fn spawn_event(s: &crate::ZoneSpawn) -> Event {
             z: i32::from(s.z),
             heading_deg: heading_deg(s.heading, 11),
         }),
+        velocity: Velocity::default(),
+        delta_heading: None,
+        animation: None,
+        equipment_models: None,
     })
 }
 
@@ -163,6 +167,9 @@ fn mob_update(bytes: &[u8]) -> Decoded {
                 z: s.z,
                 heading_deg: heading_deg(s.heading, 12),
             },
+            velocity: Velocity::default(),
+            delta_heading: None,
+            animation: None,
         }),
         Err(_) => Decoded::Malformed,
     }
@@ -178,6 +185,13 @@ fn npc_move_update(bytes: &[u8]) -> Decoded {
                 z: i32::from(s.z),
                 heading_deg: heading_deg(s.heading as u16, 12),
             },
+            velocity: Velocity {
+                x: s.has_delta_x.then_some(i32::from(s.delta_x)),
+                y: s.has_delta_y.then_some(i32::from(s.delta_y)),
+                z: s.has_delta_z.then_some(i32::from(s.delta_z)),
+            },
+            delta_heading: s.has_delta_heading.then_some(i16::from(s.delta_heading)),
+            animation: s.has_animation.then_some(s.animation),
         }),
         Err(_) => Decoded::Malformed,
     }
@@ -289,6 +303,9 @@ fn self_pos(bytes: &[u8]) -> Decoded {
             // The phantom twin's id (see player_self_pos) — the host feeds it
             // to SelfTracker, which is the only thing allowed to act on it.
             spawn_id: u32::from(s.spawn_id),
+            velocity: Velocity::default(),
+            delta_heading: None,
+            animation: None,
         }),
         Err(_) => Decoded::Malformed,
     }

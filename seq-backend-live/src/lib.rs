@@ -7,8 +7,8 @@
 
 use seq_events::{
     heading_deg, Backend, Decoded, Dir, DoorInfo, Event, GroundItemInfo, GuildInZone,
-    GuildRosterMember, ItemTemplate, Point3, Pos, ProfileInfo, SpawnInfo, ZoneEnvironment,
-    ZoneInfo, ZonePointInfo,
+    GuildRosterMember, ItemTemplate, Point3, Pos, ProfileInfo, SpawnInfo, Velocity,
+    ZoneEnvironment, ZoneInfo, ZonePointInfo,
 };
 
 /// The Live/Test backend (shared `seq-decode` parsers).
@@ -82,24 +82,41 @@ impl Backend for LiveBackend {
 
 fn spawn(bytes: &[u8]) -> Decoded {
     match seq_decode::spawn::parse_spawn(bytes) {
-        Ok(s) => Decoded::One(Event::SpawnAdded(SpawnInfo {
-            id: s.spawn_id,
-            name: s.name,
-            last_name: s.last_name,
-            race: s.race,
-            class_: s.class_,
-            deity: s.deity,
-            level: s.level,
-            npc: s.npc,
-            cur_hp: u32::from(s.cur_hp),
-            max_hp: None, // Live spawn carries no max HP; arrives via HP opcodes.
-            guild_id: s.guild_id,
-            // Live has no guild-in-zone name feed wired, so the pair is unused
-            // here; 0 keeps the key inert rather than colliding on server 0.
-            guild_server_id: 0,
-            class_mask: 0, // live isn't multiclass
-            pos: None,     // Live position arrives via OP_MobUpdate.
-        })),
+        Ok(s) => {
+            let motion = s.motion();
+            let equipment_models = s.equipment_models();
+            Decoded::One(Event::SpawnAdded(SpawnInfo {
+                id: s.spawn_id,
+                name: s.name,
+                last_name: s.last_name,
+                race: s.race,
+                class_: s.class_,
+                deity: s.deity,
+                level: s.level,
+                npc: s.npc,
+                cur_hp: u32::from(s.cur_hp),
+                max_hp: None, // Live spawn carries no max HP; arrives via HP opcodes.
+                guild_id: s.guild_id,
+                // Live has no guild-in-zone name feed wired, so the pair is unused
+                // here; 0 keeps the key inert rather than colliding on server 0.
+                guild_server_id: 0,
+                class_mask: 0, // live isn't multiclass
+                pos: Some(Pos {
+                    x: motion.x,
+                    y: motion.y,
+                    z: motion.z,
+                    heading_deg: heading_deg(motion.heading, 12),
+                }),
+                velocity: Velocity {
+                    x: Some(motion.delta_x),
+                    y: Some(motion.delta_y),
+                    z: Some(motion.delta_z),
+                },
+                delta_heading: Some(motion.delta_heading),
+                animation: Some(motion.animation),
+                equipment_models: Some(equipment_models),
+            }))
+        }
         Err(_) => Decoded::Malformed,
     }
 }
@@ -114,6 +131,9 @@ fn mob_update(bytes: &[u8]) -> Decoded {
                 z: s.z,
                 heading_deg: heading_deg(s.heading, 12),
             },
+            velocity: Velocity::default(),
+            delta_heading: None,
+            animation: None,
         }),
         Err(_) => Decoded::Malformed,
     }
@@ -129,6 +149,13 @@ fn npc_move_update(bytes: &[u8]) -> Decoded {
                 z: i32::from(s.z),
                 heading_deg: heading_deg(s.heading as u16, 12),
             },
+            velocity: Velocity {
+                x: s.has_delta_x.then_some(i32::from(s.delta_x)),
+                y: s.has_delta_y.then_some(i32::from(s.delta_y)),
+                z: s.has_delta_z.then_some(i32::from(s.delta_z)),
+            },
+            delta_heading: s.has_delta_heading.then_some(i16::from(s.delta_heading)),
+            animation: s.has_animation.then_some(s.animation),
         }),
         Err(_) => Decoded::Malformed,
     }
@@ -186,6 +213,13 @@ fn self_pos(bytes: &[u8]) -> Decoded {
                 heading_deg: heading_deg(s.heading, 12),
             },
             spawn_id: u32::from(s.spawn_id),
+            velocity: Velocity {
+                x: Some(s.delta_x as i32),
+                y: Some(s.delta_y as i32),
+                z: Some(s.delta_z as i32),
+            },
+            delta_heading: Some(s.delta_heading),
+            animation: Some(s.animation),
         }),
         Err(_) => Decoded::Malformed,
     }

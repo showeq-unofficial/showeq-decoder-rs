@@ -47,6 +47,11 @@ pub struct NpcMoveUpdate {
     pub delta_z: i16,
     pub delta_heading: i8,
     pub animation: i16,
+    pub has_delta_x: bool,
+    pub has_delta_y: bool,
+    pub has_delta_z: bool,
+    pub has_delta_heading: bool,
+    pub has_animation: bool,
 }
 
 #[derive(Debug, Error, PartialEq, Eq)]
@@ -187,6 +192,11 @@ pub fn parse_npc_move_update(bytes: &[u8]) -> Result<NpcMoveUpdate, NpcMoveUpdat
         delta_z,
         delta_heading,
         animation,
+        has_delta_x: field_specifier & MASK_DELTA_X != 0,
+        has_delta_y: field_specifier & MASK_DELTA_Y != 0,
+        has_delta_z: field_specifier & MASK_DELTA_Z != 0,
+        has_delta_heading: field_specifier & MASK_DELTA_HEADING != 0,
+        has_animation: field_specifier & MASK_ANIMATION != 0,
     })
 }
 
@@ -240,5 +250,60 @@ mod tests {
         assert_eq!(r.z, 0);
         assert_eq!(r.heading, 0);
         assert_eq!(r.delta_x, 0);
+        assert!(!r.has_delta_x);
+        assert!(!r.has_delta_y);
+        assert!(!r.has_delta_z);
+        assert!(!r.has_delta_heading);
+        assert!(!r.has_animation);
+    }
+
+    fn push_uint(bits: &mut Vec<bool>, value: u32, width: usize) {
+        for shift in (0..width).rev() {
+            bits.push(value & (1 << shift) != 0);
+        }
+    }
+
+    fn push_int(bits: &mut Vec<bool>, value: i32, width: usize) {
+        push_uint(bits, u32::from(value < 0), 1);
+        push_uint(bits, value.unsigned_abs(), width - 1);
+    }
+
+    #[test]
+    fn records_which_optional_motion_fields_were_on_the_wire() {
+        let mut bits = Vec::new();
+        push_uint(&mut bits, 0x1234, 16);
+        push_uint(&mut bits, 0, 16);
+        push_uint(
+            &mut bits,
+            u32::from(MASK_DELTA_HEADING | MASK_ANIMATION | MASK_DELTA_X | MASK_DELTA_Z),
+            6,
+        );
+        push_int(&mut bits, 8, 19); // y -> 1
+        push_int(&mut bits, -16, 19); // x -> -2
+        push_int(&mut bits, 24, 19); // z -> 3
+        push_int(&mut bits, 100, 12); // heading
+        push_int(&mut bits, -12, 10); // delta heading -> -3
+        push_int(&mut bits, 28, 10); // animation -> 7
+        push_int(&mut bits, 20, 13); // delta x -> 5
+        push_int(&mut bits, -36, 13); // delta z -> -9
+
+        let mut bytes = vec![0u8; bits.len().div_ceil(8)];
+        for (index, bit) in bits.into_iter().enumerate() {
+            if bit {
+                bytes[index / 8] |= 1 << (7 - index % 8);
+            }
+        }
+
+        let update = parse_npc_move_update(&bytes).unwrap();
+        assert_eq!((update.x, update.y, update.z), (-2, 1, 3));
+        assert_eq!(update.delta_x, 5);
+        assert_eq!(update.delta_z, -9);
+        assert_eq!(update.delta_heading, -3);
+        assert_eq!(update.animation, 7);
+        assert!(update.has_delta_x);
+        assert!(!update.has_delta_y);
+        assert!(update.has_delta_z);
+        assert!(update.has_delta_heading);
+        assert!(update.has_animation);
     }
 }

@@ -29,6 +29,17 @@ pub struct Pos {
     pub heading_deg: u16,
 }
 
+/// Velocity components carried by one entity packet, in integer game-world
+/// units. Each component is optional because the compact movement wire may
+/// update only a subset. Absence is a protocol fact; compatibility projectors
+/// decide whether their older public format should emit zero for it.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Velocity {
+    pub x: Option<i32>,
+    pub y: Option<i32>,
+    pub z: Option<i32>,
+}
+
 /// One absolute vital value. Some packets carry only the current value, so a
 /// maximum is optional rather than synthesized from a host convention.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -113,8 +124,19 @@ pub struct SpawnInfo {
     /// EQL multiclass bitmask (bit N = class N). 0 on non-multiclass wires.
     pub class_mask: u32,
     /// Present when the spawn packet carries position (eql); `None` when
-    /// position arrives separately via movement opcodes (Live).
+    /// the backend cannot locate it reliably.
     pub pos: Option<Pos>,
+    /// Initial per-axis velocity carried by the spawn packet. Live carries all
+    /// three components; eql currently has no validated fields for them.
+    pub velocity: Velocity,
+    /// Initial heading delta carried by the spawn packet.
+    pub delta_heading: Option<i16>,
+    /// Initial movement or pose animation carried by the spawn packet.
+    pub animation: Option<i16>,
+    /// Nine visual equipment model ids in worn-slot order. `None` means that
+    /// this backend did not decode equipment, while `Some([0; 9])` means the
+    /// packet explicitly reported nine empty models.
+    pub equipment_models: Option<[u32; 9]>,
 }
 
 /// The local player's character profile (self identity + vitals).
@@ -382,7 +404,16 @@ pub enum Event {
     /// A spawn entered the zone (OP_ZoneEntry).
     SpawnAdded(SpawnInfo),
     /// A spawn moved (OP_MobUpdate / OP_NpcMoveUpdate).
-    SpawnMoved { id: u32, pos: Pos },
+    SpawnMoved {
+        id: u32,
+        pos: Pos,
+        /// Per-axis velocity values present on this movement wire.
+        velocity: Velocity,
+        /// Heading delta present on this movement wire.
+        delta_heading: Option<i16>,
+        /// Movement or pose animation present on this movement wire.
+        animation: Option<i16>,
+    },
     /// A spawn left the zone (OP_RemoveSpawn / OP_DeleteSpawn).
     SpawnRemoved { id: u32 },
     /// A spawn changed its server-provided display name. `id` is present when
@@ -435,7 +466,13 @@ pub enum Event {
     /// carried here because it is the only self-identifying field that keeps
     /// arriving mid-session. On EQL it names the phantom twin, so only the
     /// session may adopt it.
-    SelfPos { pos: Pos, spawn_id: u32 },
+    SelfPos {
+        pos: Pos,
+        spawn_id: u32,
+        velocity: Velocity,
+        delta_heading: Option<i16>,
+        animation: Option<i16>,
+    },
     /// A spawn changed pose/animation (OP_SpawnAppearance2 type 6: 110=sit,
     /// 100=stand, 111=duck). Only the pose subtype is surfaced — other
     /// appearance types carry no spawn field. The consumer updates the tracked

@@ -2,7 +2,7 @@ use super::*;
 use seq_events::{
     BuffEntry, DoorInfo, Event, GroundItemInfo, GuildInZone, GuildRosterMember, ItemTemplate,
     LootItemInfo, PlayerAppearance, PlayerIdentity, PlayerVitals, Point3, Pos, ProfileInfo,
-    SessionResetReason, SpawnInfo, VitalValue, ZoneEnvironment, ZoneInfo, ZonePointInfo,
+    SessionResetReason, SpawnInfo, Velocity, VitalValue, ZoneEnvironment, ZoneInfo, ZonePointInfo,
 };
 
 fn pos(seed: i32) -> Pos {
@@ -22,6 +22,14 @@ fn point3(seed: f32) -> Point3 {
     }
 }
 
+fn velocity(seed: i32) -> Velocity {
+    Velocity {
+        x: Some(seed),
+        y: None,
+        z: Some(seed + 2),
+    }
+}
+
 fn spawn() -> SpawnInfo {
     SpawnInfo {
         id: 1,
@@ -38,6 +46,10 @@ fn spawn() -> SpawnInfo {
         guild_server_id: 10,
         class_mask: 11,
         pos: Some(pos(12)),
+        velocity: velocity(16),
+        delta_heading: Some(19),
+        animation: Some(20),
+        equipment_models: Some([21, 22, 23, 24, 25, 26, 27, 28, 29]),
     }
 }
 
@@ -202,11 +214,18 @@ fn canonical_events() -> Vec<Event> {
         Event::SpawnAdded(SpawnInfo {
             max_hp: None,
             pos: None,
+            velocity: Velocity::default(),
+            delta_heading: None,
+            animation: None,
+            equipment_models: None,
             ..spawn()
         }),
         Event::SpawnMoved {
             id: 120,
             pos: pos(121),
+            velocity: velocity(125),
+            delta_heading: Some(128),
+            animation: None,
         },
         Event::SpawnRemoved { id: 130 },
         Event::SpawnRenamed {
@@ -239,6 +258,9 @@ fn canonical_events() -> Vec<Event> {
         Event::SelfPos {
             pos: pos(150),
             spawn_id: 154,
+            velocity: velocity(155),
+            delta_heading: Some(158),
+            animation: None,
         },
         Event::SpawnAnimation {
             spawn_id: 160,
@@ -500,6 +522,24 @@ fn unspawn(spawn: &ffi::EventSpawnInfo) -> SpawnInfo {
         guild_server_id: spawn.guild_server_id,
         class_mask: spawn.class_mask,
         pos: spawn.has_pos.then(|| unpos(&spawn.pos)),
+        velocity: unvelocity(&spawn.velocity),
+        delta_heading: spawn.has_delta_heading.then_some(spawn.delta_heading),
+        animation: spawn.has_animation.then_some(spawn.animation),
+        equipment_models: spawn.has_equipment_models.then(|| {
+            spawn
+                .equipment_models
+                .as_slice()
+                .try_into()
+                .expect("CXX equipment model count")
+        }),
+    }
+}
+
+fn unvelocity(velocity: &ffi::EventVelocity) -> Velocity {
+    Velocity {
+        x: velocity.has_x.then_some(velocity.x),
+        y: velocity.has_y.then_some(velocity.y),
+        z: velocity.has_z.then_some(velocity.z),
     }
 }
 
@@ -661,6 +701,9 @@ fn reconstruct(batch: &ffi::SessionDecodeBatch) -> Vec<Event> {
                     Event::SpawnMoved {
                         id: p.id,
                         pos: unpos(&p.pos),
+                        velocity: unvelocity(&p.velocity),
+                        delta_heading: p.has_delta_heading.then_some(p.delta_heading),
+                        animation: p.has_animation.then_some(p.animation),
                     }
                 }
                 ffi::SessionEventKind::SpawnRemoved => Event::SpawnRemoved {
@@ -710,6 +753,9 @@ fn reconstruct(batch: &ffi::SessionDecodeBatch) -> Vec<Event> {
                     Event::SelfPos {
                         pos: unpos(&p.pos),
                         spawn_id: p.spawn_id,
+                        velocity: unvelocity(&p.velocity),
+                        delta_heading: p.has_delta_heading.then_some(p.delta_heading),
+                        animation: p.has_animation.then_some(p.animation),
                     }
                 }
                 ffi::SessionEventKind::SpawnAnimation => {

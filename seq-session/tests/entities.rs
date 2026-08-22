@@ -1,4 +1,4 @@
-use seq_events::{Event, Point3};
+use seq_events::{Event, Point3, Pos, Velocity};
 #[cfg(feature = "backend-live")]
 use seq_session::FlushReason;
 use seq_session::{
@@ -67,8 +67,20 @@ fn live_spawn(name: &str, id: u32) -> Vec<u8> {
     bytes.extend_from_slice(&[0; 2]);
     bytes.extend_from_slice(&0u32.to_le_bytes());
     bytes.extend_from_slice(&[0; 49]);
-    bytes.extend_from_slice(&[0; 60]);
     bytes.extend_from_slice(&[0; 20]);
+    for value in [700u32, 0, 0, 0, 0, 800, 0, 0, 0, 0] {
+        bytes.extend_from_slice(&value.to_le_bytes());
+    }
+    let signed = |value: i32, bits: u32| (value as u32) & ((1 << bits) - 1);
+    for value in [
+        signed(24, 19) | (signed(7, 10) << 19),
+        signed(80, 19) | (1024 << 19),
+        signed(20, 13),
+        signed(160, 19) | (signed(-28, 13) << 19),
+        signed(9, 10) | (signed(36, 13) << 10),
+    ] {
+        bytes.extend_from_slice(&value.to_le_bytes());
+    }
     bytes.extend_from_slice(&[0; 8]);
     bytes.push(0);
     bytes.extend_from_slice(&[0; 66]);
@@ -216,16 +228,52 @@ fn assert_entity_trace(
 ) {
     let mut session = session(backend, first_opcode);
     let spawn_id = 4_242;
-    assert!(matches!(
-        decode(&mut session, first_opcode, spawn_payload).as_slice(),
-        [Event::SpawnAdded(spawn)] if spawn.id == spawn_id && spawn.name == "a guard"
-    ));
+    let added = decode(&mut session, first_opcode, spawn_payload);
+    let [Event::SpawnAdded(spawn)] = added.as_slice() else {
+        panic!("expected one spawn-added event");
+    };
+    assert_eq!(spawn.id, spawn_id);
+    assert_eq!(spawn.name, "a guard");
+    match backend {
+        BackendId::Live | BackendId::Test => {
+            assert_eq!(
+                spawn.pos,
+                Some(Pos {
+                    x: 20,
+                    y: 10,
+                    z: 3,
+                    heading_deg: 270,
+                })
+            );
+            assert_eq!(
+                spawn.velocity,
+                Velocity {
+                    x: Some(-7),
+                    y: Some(5),
+                    z: Some(9),
+                }
+            );
+            assert_eq!(spawn.delta_heading, Some(9));
+            assert_eq!(spawn.animation, Some(7));
+            assert_eq!(
+                spawn.equipment_models,
+                Some([0, 0, 0, 0, 0, 0, 0, 700, 800])
+            );
+        }
+        BackendId::Eql => {
+            assert_eq!(spawn.velocity, Velocity::default());
+            assert_eq!(spawn.delta_heading, None);
+            assert_eq!(spawn.animation, None);
+            assert_eq!(spawn.equipment_models, None);
+        }
+    }
 
     let mut movement = [0; 14];
     movement[..4].copy_from_slice(&spawn_id.to_le_bytes());
     assert!(matches!(
         decode(&mut session, first_opcode + 1, &movement).as_slice(),
-        [Event::SpawnMoved { id, .. }] if *id == spawn_id
+        [Event::SpawnMoved { id, velocity, delta_heading: None, animation: None, .. }]
+            if *id == spawn_id && *velocity == Velocity::default()
     ));
 
     assert_eq!(
