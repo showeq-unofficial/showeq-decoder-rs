@@ -14,10 +14,12 @@ auto batch = session->decode(
 ```
 
 An empty `protocol_dir` selects the embedded catalogs. A non-empty directory
-uses the existing host layout: `opcodes.toml`, `test/opcodes.toml`, and
-`eql/opcodes.toml`. `SessionProtocolRegistry::reload` validates a complete
-backend file before swapping it. It throws a Rust error on failure and leaves
-the prior generation active. `content_hash` returns the semantic SHA-256.
+uses the semantic Rust catalog layout: `opcodes.toml`, `test/opcodes.toml`, and
+`eql/opcodes.toml`. These files may contain documented diagnostic metadata but
+not C++ payload typename or size gates. `SessionProtocolRegistry::reload`
+validates a complete backend file before swapping it. It throws a Rust error on
+failure and leaves the prior generation active. `content_hash` returns the
+semantic SHA-256.
 
 `SessionDecodeBatch.events` preserves Rust event order. Each entry has a
 `SessionEventKind` and `payload_index`. Read the index from the typed vector

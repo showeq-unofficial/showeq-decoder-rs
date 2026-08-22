@@ -2,18 +2,33 @@
 
 The TOML files under `data/` are the Rust-owned opcode lookup catalogs. They
 contain only mapped IDs and stable opcode names, split into world and zone
-streams. C++ payload type and size gates are not parser rules here.
+streams. Rows may also carry the diagnostic-only `priority`, `priority_note`,
+`updated`, and `comment` fields. Unknown sections and row fields are rejected.
+C++ payload type and size gates are not parser rules here and the Rust loader
+rejects them.
 
-During the host migration, compare the old scry-cpp copies with:
+During the host migration, compare payload-rich legacy scry-cpp files by their
+semantic ID/name mappings with:
 
 ```sh
 python3 seq-protocol-data/tools/import_host_catalogs.py --check ../scry-cpp/conf
 ```
 
-After reviewing a patch-day host change, import it deterministically with
-`--update`, inspect the diff, and commit the Rust files. Once both hosts load
-these catalogs directly, generate any remaining compatibility copies from the
-Rust files and reverse the check direction.
+Patch-day edits begin in `data/`, never in a host mirror. Generate minimal
+compatibility mirrors into a packaging or staging directory with:
+
+```sh
+python3 seq-protocol-data/tools/import_host_catalogs.py --generate path/to/mirror/conf
+```
+
+`--generate` writes `opcodes.toml`, `test/opcodes.toml`, and
+`eql/opcodes.toml` under the target. Do not point it at payload-rich legacy
+files that still need host-only gates; use `--check` for those files and update
+their semantic rows from the reviewed Rust change. The tool has no mode that
+writes `data/`.
+
+`ProtocolRegistry::from_directory` loads the same semantic schema and path
+layout as `data/`. It does not load old payload-rich C++ configuration files.
 
 The current semantic SHA-256 hashes are:
 

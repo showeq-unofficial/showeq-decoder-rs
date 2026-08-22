@@ -1,7 +1,9 @@
 //! Canonical opcode catalogs shared by every packet-decoding host.
 //!
 //! IDs are qualified by backend and stream. `0xffff` entries in the source
-//! files are patch-day placeholders and never enter the lookup tables.
+//! files are patch-day placeholders and never enter the lookup tables. The
+//! schema rejects unknown sections and row fields; documented diagnostic
+//! metadata is accepted but excluded from the semantic content hash.
 
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
@@ -173,6 +175,7 @@ impl Catalog {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct RawCatalog {
     #[serde(default)]
     world: Vec<RawOpcode>,
@@ -181,9 +184,20 @@ struct RawCatalog {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct RawOpcode {
     id: String,
     name: String,
+    /// Optional Rust-owned diagnostics. These do not affect lookup or the
+    /// semantic content hash.
+    #[serde(default, rename = "priority")]
+    _priority: Option<i32>,
+    #[serde(default, rename = "priority_note")]
+    _priority_note: Option<String>,
+    #[serde(default, rename = "updated")]
+    _updated: Option<String>,
+    #[serde(default, rename = "comment")]
+    _comment: Option<String>,
 }
 
 fn validate_stream(
@@ -194,19 +208,27 @@ fn validate_stream(
     let mut by_id: BTreeMap<OpcodeId, Arc<str>> = BTreeMap::new();
     let mut by_name = HashMap::new();
     for entry in entries {
-        let id_text = entry.id.trim().trim_start_matches("0x");
+        let RawOpcode {
+            id: id_source,
+            name,
+            _priority: _,
+            _priority_note: _,
+            _updated: _,
+            _comment: _,
+        } = entry;
+        let id_text = id_source.trim().trim_start_matches("0x");
         let id = u16::from_str_radix(id_text, 16).map_err(|_| CatalogError::InvalidId {
             backend,
             stream,
-            id: entry.id.clone(),
-            name: entry.name.clone(),
+            id: id_source.clone(),
+            name: name.clone(),
         })?;
-        let name = entry.name.trim();
+        let name = name.trim();
         if name.is_empty() {
             return Err(CatalogError::EmptyName {
                 backend,
                 stream,
-                id: entry.id,
+                id: id_source,
             });
         }
 
@@ -553,6 +575,31 @@ mod tests {
     }
 
     #[test]
+    fn rejects_unknown_sections_and_row_fields() {
+        let unknown_section =
+            "[[world]]\nid='0001'\nname='OP_World'\n\n[[znoe]]\nid='0002'\nname='OP_Zone'\n";
+        assert!(matches!(
+            Catalog::parse(BackendId::Live, unknown_section),
+            Err(CatalogError::Malformed { .. })
+        ));
+
+        let unknown_field = "[[zone]]\nid='0001'\nname='OP_Zone'\n\n[[zone.payloads]]\ndir='server'\ntypename='ZonePacket'\nsizechecktype='exact'\n";
+        assert!(matches!(
+            Catalog::parse(BackendId::Live, unknown_field),
+            Err(CatalogError::Malformed { .. })
+        ));
+    }
+
+    #[test]
+    fn accepts_documented_diagnostic_metadata_without_hashing_it() {
+        let plain = "[[zone]]\nid='0001'\nname='OP_Zone'\n";
+        let annotated = "[[zone]]\nid='0001'\nname='OP_Zone'\npriority=7\npriority_note='core'\nupdated='2026-08-21'\ncomment='diagnostic only'\n";
+        let plain = Catalog::parse(BackendId::Live, plain).unwrap();
+        let annotated = Catalog::parse(BackendId::Live, annotated).unwrap();
+        assert_eq!(plain.content_hash(), annotated.content_hash());
+    }
+
+    #[test]
     fn unmapped_placeholders_may_repeat_but_are_not_looked_up() {
         let input = source(&[(0xffff, "OP_A"), (0xffff, "OP_B"), (1, "OP_C")], &[]);
         let catalog = Catalog::parse(BackendId::Live, &input).unwrap();
@@ -610,7 +657,27 @@ mod tests {
     }
 
     #[test]
-    fn directory_reload_uses_host_layout_and_keeps_last_good_on_io_or_parse_error() {
+    fn typo_reload_keeps_the_last_good_catalog() {
+        let registry = ProtocolRegistry::embedded().unwrap();
+        let before = registry.snapshot(BackendId::Eql);
+
+        for invalid in [
+            "[[znoe]]\nid='0001'\nname='OP_Typo'\n",
+            "[[zone]]\nid='0001'\nname='OP_Typo'\nprioroty=9\n",
+        ] {
+            assert!(registry.replace_from_str(BackendId::Eql, invalid).is_err());
+            let after = registry.snapshot(BackendId::Eql);
+            assert_eq!(after.generation(), before.generation());
+            assert_eq!(after.content_hash(), before.content_hash());
+            assert_eq!(
+                after.lookup(StreamKind::Zone, OpcodeId(0x6afc)),
+                Some("OP_PlayerProfile")
+            );
+        }
+    }
+
+    #[test]
+    fn directory_reload_uses_semantic_layout_and_keeps_last_good_on_io_or_parse_error() {
         let root = TempCatalogDir::new();
         fs::write(root.0.join("opcodes.toml"), source(&[(1, "OP_Live")], &[])).unwrap();
         fs::write(

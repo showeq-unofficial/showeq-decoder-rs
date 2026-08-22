@@ -1,5 +1,5 @@
 # Canonical Rust opcode lookup data.
-# Generated with tools/import_host_catalogs.py during host migration.
+# Rust is authoritative; host mirrors are checked or generated from this file.
 # Payload typename and size gates intentionally stay in the host.
 
 [[world]]
