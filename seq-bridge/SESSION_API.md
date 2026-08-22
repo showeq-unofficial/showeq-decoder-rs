@@ -39,6 +39,21 @@ their wire record carries no heading. `CorpseLocated` and `ZonePoints` carry
 float coordinates. A host projector may round them or create compatibility ids
 when producing an older public format.
 
+Player-family events carry final session meaning. `PlayerMoved` never exposes
+EQL's phantom-twin id. Its `has_spawn_id` flag stays false during a cold attach
+until the session finds the real moving spawn. `PlayerVitalsUpdated` is partial;
+each resource and each maximum has its own presence flag. `PlayerDied` and
+`SpawnDied` use `has_killer_id` instead of asking the host to interpret zero.
+`PlayerIdentityUpdated` covers profiles, the real self spawn, and loadout
+changes. `PlayerAppearanceUpdated` contains only the race, gender, or animation
+fields carried by that packet. Other spawns use `SpawnHealthUpdated`,
+`SpawnIdentityUpdated`, and `SpawnDied`.
+
+The old `SelfPos`, `StatSync`, `SpawnHp`, `SpawnKilled`, and `LoadoutSwap`
+variants remain in the mechanical bridge because the public name-based backend
+API can still produce them. A numeric `SessionResource` translates those wire
+events and does not return them to a host.
+
 Lifecycle batches have strict ordering. A reset caused by `OP_EnterWorld`, a
 profile, or a confirmed Live/Test zone transition precedes the event that
 caused it. `OP_NewZone` emits `ZoneChanged` followed by
@@ -47,7 +62,8 @@ and does not reset session state. A malformed lifecycle packet emits no event
 and changes no correlation state.
 
 The batch also returns `protocol_generation`, `SessionDisposition`, and the
-EQL shadow correlation outputs `self_stats` and `loot_rows`. Call `flush` at
+legacy EQL shadow correlation outputs `self_stats` and `loot_rows`. New code
+uses the ordered player events. Call `flush` at
 shutdown, zone transition, and replay end, then consume its correlation rows.
 
 The selected bridge backend is fixed at build time. `session_new` rejects a

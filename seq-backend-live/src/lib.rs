@@ -255,8 +255,9 @@ fn action2(bytes: &[u8]) -> Decoded {
     }
 }
 
-// OP_Death (newCorpseStruct): a death leaves a corpse, not a removal; the caller
-// owns the self-death case (SpawnShell::killSpawn).
+// OP_Death (newCorpseStruct): a death leaves a corpse, not a removal.
+// seq-session resolves player ownership; direct backend callers retain this
+// low-level result during migration.
 fn death(bytes: &[u8]) -> Decoded {
     match seq_decode::death::parse_death(bytes) {
         Ok(d) => Decoded::One(Event::SpawnKilled {

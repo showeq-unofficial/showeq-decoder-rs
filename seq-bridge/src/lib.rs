@@ -884,6 +884,14 @@ mod ffi {
         SpawnRenamed = 52,
         CorpseLocated = 53,
         ZonePoints = 54,
+        PlayerIdentityUpdated = 55,
+        PlayerMoved = 56,
+        PlayerVitalsUpdated = 57,
+        SpawnHealthUpdated = 58,
+        PlayerDied = 59,
+        SpawnDied = 60,
+        SpawnIdentityUpdated = 61,
+        PlayerAppearanceUpdated = 62,
     }
 
     struct SessionEventRef {
@@ -900,6 +908,63 @@ mod ffi {
         x: f32,
         y: f32,
         z: f32,
+    }
+    struct EventPlayerIdentity {
+        has_spawn_id: bool,
+        spawn_id: u32,
+        name: String,
+        last_name: String,
+        race: u32,
+        class_: u32,
+        deity: u32,
+        level: u32,
+        class_mask: u32,
+    }
+    struct EventPlayerMoved {
+        has_spawn_id: bool,
+        spawn_id: u32,
+        pos: EventPos,
+    }
+    struct EventVitalValue {
+        current: i32,
+        has_maximum: bool,
+        maximum: i32,
+    }
+    struct EventPlayerVitals {
+        has_health: bool,
+        health: EventVitalValue,
+        has_mana: bool,
+        mana: EventVitalValue,
+        has_endurance: bool,
+        endurance: EventVitalValue,
+    }
+    struct EventSpawnHealth {
+        id: u32,
+        current: i32,
+        maximum: i32,
+    }
+    struct EventPlayerDied {
+        has_killer_id: bool,
+        killer_id: u32,
+    }
+    struct EventSpawnDied {
+        id: u32,
+        has_killer_id: bool,
+        killer_id: u32,
+    }
+    struct EventSpawnIdentity {
+        id: u32,
+        level: u32,
+        class_: u32,
+        race: u32,
+    }
+    struct EventPlayerAppearance {
+        has_race: bool,
+        race: u32,
+        has_gender: bool,
+        gender: u8,
+        has_animation: bool,
+        animation: u32,
     }
     struct EventSpawnInfo {
         id: u32,
@@ -1258,6 +1323,14 @@ mod ffi {
         protocol_generation: u64,
         disposition: SessionDisposition,
         events: Vec<SessionEventRef>,
+        player_identity_updated: Vec<EventPlayerIdentity>,
+        player_moved: Vec<EventPlayerMoved>,
+        player_vitals_updated: Vec<EventPlayerVitals>,
+        spawn_health_updated: Vec<EventSpawnHealth>,
+        player_died: Vec<EventPlayerDied>,
+        spawn_died: Vec<EventSpawnDied>,
+        spawn_identity_updated: Vec<EventSpawnIdentity>,
+        player_appearance_updated: Vec<EventPlayerAppearance>,
         spawn_added: Vec<EventSpawnInfo>,
         spawn_moved: Vec<EventSpawnMoved>,
         spawn_removed: Vec<EventSpawnId>,
@@ -1678,6 +1751,32 @@ fn event_pos(pos: seq_events::Pos) -> ffi::EventPos {
     }
 }
 
+fn event_vital(value: Option<seq_events::VitalValue>) -> ffi::EventVitalValue {
+    let value = value.unwrap_or(seq_events::VitalValue {
+        current: 0,
+        maximum: None,
+    });
+    ffi::EventVitalValue {
+        current: value.current,
+        has_maximum: value.maximum.is_some(),
+        maximum: value.maximum.unwrap_or_default(),
+    }
+}
+
+fn event_player_identity(identity: seq_events::PlayerIdentity) -> ffi::EventPlayerIdentity {
+    ffi::EventPlayerIdentity {
+        has_spawn_id: identity.spawn_id.is_some(),
+        spawn_id: identity.spawn_id.unwrap_or_default(),
+        name: identity.name,
+        last_name: identity.last_name,
+        race: identity.race,
+        class_: identity.class_,
+        deity: identity.deity,
+        level: identity.level,
+        class_mask: identity.class_mask,
+    }
+}
+
 fn event_point3(point: seq_events::Point3) -> ffi::EventPoint3 {
     ffi::EventPoint3 {
         x: point.x,
@@ -1879,6 +1978,93 @@ fn translate_event(batch: &mut ffi::SessionDecodeBatch, event: seq_events::Event
                 reason: event_session_reset_reason(reason),
             });
             push_ref(batch, ffi::SessionEventKind::SessionReset, index);
+        }
+        Event::PlayerIdentityUpdated(identity) => {
+            let index = batch.player_identity_updated.len();
+            batch
+                .player_identity_updated
+                .push(event_player_identity(identity));
+            push_ref(batch, ffi::SessionEventKind::PlayerIdentityUpdated, index);
+        }
+        Event::PlayerMoved { spawn_id, pos } => {
+            let index = batch.player_moved.len();
+            batch.player_moved.push(ffi::EventPlayerMoved {
+                has_spawn_id: spawn_id.is_some(),
+                spawn_id: spawn_id.unwrap_or_default(),
+                pos: event_pos(pos),
+            });
+            push_ref(batch, ffi::SessionEventKind::PlayerMoved, index);
+        }
+        Event::PlayerVitalsUpdated(vitals) => {
+            let index = batch.player_vitals_updated.len();
+            batch.player_vitals_updated.push(ffi::EventPlayerVitals {
+                has_health: vitals.health.is_some(),
+                health: event_vital(vitals.health),
+                has_mana: vitals.mana.is_some(),
+                mana: event_vital(vitals.mana),
+                has_endurance: vitals.endurance.is_some(),
+                endurance: event_vital(vitals.endurance),
+            });
+            push_ref(batch, ffi::SessionEventKind::PlayerVitalsUpdated, index);
+        }
+        Event::SpawnHealthUpdated {
+            id,
+            current,
+            maximum,
+        } => {
+            let index = batch.spawn_health_updated.len();
+            batch.spawn_health_updated.push(ffi::EventSpawnHealth {
+                id,
+                current,
+                maximum,
+            });
+            push_ref(batch, ffi::SessionEventKind::SpawnHealthUpdated, index);
+        }
+        Event::PlayerDied { killer_id } => {
+            let index = batch.player_died.len();
+            batch.player_died.push(ffi::EventPlayerDied {
+                has_killer_id: killer_id.is_some(),
+                killer_id: killer_id.unwrap_or_default(),
+            });
+            push_ref(batch, ffi::SessionEventKind::PlayerDied, index);
+        }
+        Event::SpawnDied { id, killer_id } => {
+            let index = batch.spawn_died.len();
+            batch.spawn_died.push(ffi::EventSpawnDied {
+                id,
+                has_killer_id: killer_id.is_some(),
+                killer_id: killer_id.unwrap_or_default(),
+            });
+            push_ref(batch, ffi::SessionEventKind::SpawnDied, index);
+        }
+        Event::SpawnIdentityUpdated {
+            id,
+            level,
+            class_,
+            race,
+        } => {
+            let index = batch.spawn_identity_updated.len();
+            batch.spawn_identity_updated.push(ffi::EventSpawnIdentity {
+                id,
+                level,
+                class_,
+                race,
+            });
+            push_ref(batch, ffi::SessionEventKind::SpawnIdentityUpdated, index);
+        }
+        Event::PlayerAppearanceUpdated(appearance) => {
+            let index = batch.player_appearance_updated.len();
+            batch
+                .player_appearance_updated
+                .push(ffi::EventPlayerAppearance {
+                    has_race: appearance.race.is_some(),
+                    race: appearance.race.unwrap_or_default(),
+                    has_gender: appearance.gender.is_some(),
+                    gender: appearance.gender.unwrap_or_default(),
+                    has_animation: appearance.animation.is_some(),
+                    animation: appearance.animation.unwrap_or_default(),
+                });
+            push_ref(batch, ffi::SessionEventKind::PlayerAppearanceUpdated, index);
         }
         Event::SpawnAdded(spawn) => {
             let index = batch.spawn_added.len();
@@ -2432,6 +2618,14 @@ fn empty_session_batch(
         protocol_generation,
         disposition,
         events: Vec::new(),
+        player_identity_updated: Vec::new(),
+        player_moved: Vec::new(),
+        player_vitals_updated: Vec::new(),
+        spawn_health_updated: Vec::new(),
+        player_died: Vec::new(),
+        spawn_died: Vec::new(),
+        spawn_identity_updated: Vec::new(),
+        player_appearance_updated: Vec::new(),
         spawn_added: Vec::new(),
         spawn_moved: Vec::new(),
         spawn_removed: Vec::new(),

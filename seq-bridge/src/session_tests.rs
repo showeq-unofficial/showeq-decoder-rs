@@ -1,8 +1,8 @@
 use super::*;
 use seq_events::{
     BuffEntry, DoorInfo, Event, GroundItemInfo, GuildInZone, GuildRosterMember, ItemTemplate,
-    LootItemInfo, Point3, Pos, ProfileInfo, SessionResetReason, SpawnInfo, ZoneEnvironment,
-    ZoneInfo, ZonePointInfo,
+    LootItemInfo, PlayerAppearance, PlayerIdentity, PlayerVitals, Point3, Pos, ProfileInfo,
+    SessionResetReason, SpawnInfo, VitalValue, ZoneEnvironment, ZoneInfo, ZonePointInfo,
 };
 
 fn pos(seed: i32) -> Pos {
@@ -152,6 +152,52 @@ fn canonical_events() -> Vec<Event> {
         Event::SessionReset {
             reason: SessionResetReason::PlayerProfile,
         },
+        Event::PlayerIdentityUpdated(PlayerIdentity {
+            spawn_id: Some(101),
+            name: "player".into(),
+            last_name: "surname".into(),
+            race: 102,
+            class_: 103,
+            deity: 104,
+            level: 105,
+            class_mask: 106,
+        }),
+        Event::PlayerMoved {
+            spawn_id: None,
+            pos: pos(107),
+        },
+        Event::PlayerVitalsUpdated(PlayerVitals {
+            health: Some(VitalValue {
+                current: -111,
+                maximum: Some(112),
+            }),
+            mana: Some(VitalValue {
+                current: 113,
+                maximum: None,
+            }),
+            endurance: None,
+        }),
+        Event::SpawnHealthUpdated {
+            id: 114,
+            current: 115,
+            maximum: 116,
+        },
+        Event::PlayerDied { killer_id: None },
+        Event::SpawnDied {
+            id: 117,
+            killer_id: Some(118),
+        },
+        Event::SpawnIdentityUpdated {
+            id: 119,
+            level: 120,
+            class_: 121,
+            race: 122,
+        },
+        Event::PlayerAppearanceUpdated(PlayerAppearance {
+            race: Some(123),
+            gender: None,
+            animation: Some(124),
+        }),
         Event::SpawnAdded(spawn()),
         Event::SpawnAdded(SpawnInfo {
             max_hp: None,
@@ -418,6 +464,26 @@ fn unpoint3(point: &ffi::EventPoint3) -> Point3 {
     }
 }
 
+fn unvital(value: &ffi::EventVitalValue) -> VitalValue {
+    VitalValue {
+        current: value.current,
+        maximum: value.has_maximum.then_some(value.maximum),
+    }
+}
+
+fn unidentity(identity: &ffi::EventPlayerIdentity) -> PlayerIdentity {
+    PlayerIdentity {
+        spawn_id: identity.has_spawn_id.then_some(identity.spawn_id),
+        name: identity.name.clone(),
+        last_name: identity.last_name.clone(),
+        race: identity.race,
+        class_: identity.class_,
+        deity: identity.deity,
+        level: identity.level,
+        class_mask: identity.class_mask,
+    }
+}
+
 fn unspawn(spawn: &ffi::EventSpawnInfo) -> SpawnInfo {
     SpawnInfo {
         id: spawn.id,
@@ -531,6 +597,62 @@ fn reconstruct(batch: &ffi::SessionDecodeBatch) -> Vec<Event> {
                         _ => unreachable!("known reset reason"),
                     },
                 },
+                ffi::SessionEventKind::PlayerIdentityUpdated => {
+                    Event::PlayerIdentityUpdated(unidentity(&batch.player_identity_updated[i]))
+                }
+                ffi::SessionEventKind::PlayerMoved => {
+                    let p = &batch.player_moved[i];
+                    Event::PlayerMoved {
+                        spawn_id: p.has_spawn_id.then_some(p.spawn_id),
+                        pos: unpos(&p.pos),
+                    }
+                }
+                ffi::SessionEventKind::PlayerVitalsUpdated => {
+                    let p = &batch.player_vitals_updated[i];
+                    Event::PlayerVitalsUpdated(PlayerVitals {
+                        health: p.has_health.then(|| unvital(&p.health)),
+                        mana: p.has_mana.then(|| unvital(&p.mana)),
+                        endurance: p.has_endurance.then(|| unvital(&p.endurance)),
+                    })
+                }
+                ffi::SessionEventKind::SpawnHealthUpdated => {
+                    let p = &batch.spawn_health_updated[i];
+                    Event::SpawnHealthUpdated {
+                        id: p.id,
+                        current: p.current,
+                        maximum: p.maximum,
+                    }
+                }
+                ffi::SessionEventKind::PlayerDied => {
+                    let p = &batch.player_died[i];
+                    Event::PlayerDied {
+                        killer_id: p.has_killer_id.then_some(p.killer_id),
+                    }
+                }
+                ffi::SessionEventKind::SpawnDied => {
+                    let p = &batch.spawn_died[i];
+                    Event::SpawnDied {
+                        id: p.id,
+                        killer_id: p.has_killer_id.then_some(p.killer_id),
+                    }
+                }
+                ffi::SessionEventKind::SpawnIdentityUpdated => {
+                    let p = &batch.spawn_identity_updated[i];
+                    Event::SpawnIdentityUpdated {
+                        id: p.id,
+                        level: p.level,
+                        class_: p.class_,
+                        race: p.race,
+                    }
+                }
+                ffi::SessionEventKind::PlayerAppearanceUpdated => {
+                    let p = &batch.player_appearance_updated[i];
+                    Event::PlayerAppearanceUpdated(PlayerAppearance {
+                        race: p.has_race.then_some(p.race),
+                        gender: p.has_gender.then_some(p.gender),
+                        animation: p.has_animation.then_some(p.animation),
+                    })
+                }
                 ffi::SessionEventKind::SpawnAdded => {
                     Event::SpawnAdded(unspawn(&batch.spawn_added[i]))
                 }
@@ -1026,8 +1148,10 @@ fn stateful_bridge_sessions_are_isolated_when_interleaved() {
     let mut second = session_new(&registry, ffi::SessionBackend::Eql).unwrap();
     let mut first_payload = [0u8; seq_backend_eql::player_self_pos::PAYLOAD_LEN];
     first_payload[2..4].copy_from_slice(&101u16.to_le_bytes());
+    first_payload[10..14].copy_from_slice(&101.0f32.to_le_bytes());
     let mut second_payload = [0u8; seq_backend_eql::player_self_pos::PAYLOAD_LEN];
     second_payload[2..4].copy_from_slice(&202u16.to_le_bytes());
+    second_payload[10..14].copy_from_slice(&202.0f32.to_le_bytes());
 
     let first_batch = first.decode(
         ffi::SessionStream::Zone,
@@ -1043,8 +1167,10 @@ fn stateful_bridge_sessions_are_isolated_when_interleaved() {
         &second_payload,
         11,
     );
-    assert_eq!(first_batch.self_pos[0].spawn_id, 101);
-    assert_eq!(second_batch.self_pos[0].spawn_id, 202);
+    assert!(!first_batch.player_moved[0].has_spawn_id);
+    assert_eq!(first_batch.player_moved[0].pos.x, 101);
+    assert!(!second_batch.player_moved[0].has_spawn_id);
+    assert_eq!(second_batch.player_moved[0].pos.x, 202);
 
     first.flush(ffi::SessionFlushReason::Reset);
     let second_again = second.decode(
@@ -1054,7 +1180,8 @@ fn stateful_bridge_sessions_are_isolated_when_interleaved() {
         &second_payload,
         12,
     );
-    assert_eq!(second_again.self_pos[0].spawn_id, 202);
+    assert!(!second_again.player_moved[0].has_spawn_id);
+    assert_eq!(second_again.player_moved[0].pos.x, 202);
 
     registry
         .0

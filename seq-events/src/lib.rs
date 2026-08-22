@@ -29,6 +29,54 @@ pub struct Pos {
     pub heading_deg: u16,
 }
 
+/// One absolute vital value. Some packets carry only the current value, so a
+/// maximum is optional rather than synthesized from a host convention.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct VitalValue {
+    pub current: i32,
+    pub maximum: Option<i32>,
+}
+
+/// A partial update to the local player's combat-resource values.
+///
+/// `None` means that the packet did not carry that resource. Consumers merge
+/// the present fields into their current player snapshot.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct PlayerVitals {
+    pub health: Option<VitalValue>,
+    pub mana: Option<VitalValue>,
+    pub endurance: Option<VitalValue>,
+}
+
+impl PlayerVitals {
+    pub const fn any(self) -> bool {
+        self.health.is_some() || self.mana.is_some() || self.endurance.is_some()
+    }
+}
+
+/// Current local-player identity fields. `spawn_id` is absent until the
+/// ordered session has resolved the real moving spawn. In particular, an EQL
+/// phantom-twin id is never exposed here.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PlayerIdentity {
+    pub spawn_id: Option<u32>,
+    pub name: String,
+    pub last_name: String,
+    pub race: u32,
+    pub class_: u32,
+    pub deity: u32,
+    pub level: u32,
+    pub class_mask: u32,
+}
+
+/// A partial local-player appearance update.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct PlayerAppearance {
+    pub race: Option<u32>,
+    pub gender: Option<u8>,
+    pub animation: Option<u32>,
+}
+
 /// A precise world-space point for packets whose wire coordinates are floats.
 ///
 /// Host projectors may round these values for an older public contract. Rust
@@ -308,6 +356,29 @@ pub enum Event {
     /// Stateful correlators were reset before the next event in this batch was
     /// observed. Hosts must apply this before later events in the batch.
     SessionReset { reason: SessionResetReason },
+    /// The session resolved or changed the local player's identity. This is
+    /// emitted from profiles, the real self spawn, and EQL loadout swaps.
+    PlayerIdentityUpdated(PlayerIdentity),
+    /// The local player moved. `spawn_id` is absent on an EQL cold attach until
+    /// a name-matched moving spawn appears. The wire's phantom id is internal.
+    PlayerMoved { spawn_id: Option<u32>, pos: Pos },
+    /// One packet changed one or more local-player vital values.
+    PlayerVitalsUpdated(PlayerVitals),
+    /// One non-player spawn's health changed.
+    SpawnHealthUpdated { id: u32, current: i32, maximum: i32 },
+    /// The local player died. A zero wire killer id is represented as absent.
+    PlayerDied { killer_id: Option<u32> },
+    /// A non-player spawn died. The entity remains present as a corpse.
+    SpawnDied { id: u32, killer_id: Option<u32> },
+    /// A non-player spawn changed class, race, or level without changing id.
+    SpawnIdentityUpdated {
+        id: u32,
+        level: u32,
+        class_: u32,
+        race: u32,
+    },
+    /// The local player's visible race, gender, or pose changed.
+    PlayerAppearanceUpdated(PlayerAppearance),
     /// A spawn entered the zone (OP_ZoneEntry).
     SpawnAdded(SpawnInfo),
     /// A spawn moved (OP_MobUpdate / OP_NpcMoveUpdate).
@@ -323,20 +394,20 @@ pub enum Event {
         old_name: String,
         new_name: String,
     },
-    /// A spawn died (OP_Death). Unlike SpawnRemoved the body stays as a corpse;
-    /// the consumer keeps it in its spawn map. `killer_id` 0 = no killer / self.
-    /// The consumer owns the self-death special case (it knows the player id).
+    /// Low-level OP_Death result retained for direct backend callers. A
+    /// stateful session converts it to [`Event::PlayerDied`] or
+    /// [`Event::SpawnDied`] and converts a zero killer id to `None`.
     SpawnKilled { deceased_id: u32, killer_id: u32 },
-    /// A spawn's health changed (OP_HPUpdate). `max` is real HP for the self and
-    /// a percentage base (100) for other spawns, mirroring the wire.
+    /// Low-level OP_HPUpdate result retained for direct backend callers. A
+    /// stateful session emits player or spawn health with final ownership.
     SpawnHp { id: u32, cur: i32, max: i32 },
     /// One packet of the multiplexed stat-sync channel (eql OP_HPUpdate), which
     /// carries spawn HP plus the local player's mana/endurance together. Kept as
     /// ONE event per packet on purpose: splitting it into per-stat events makes a
     /// consumer emit several near-identical player snapshots for a single packet.
     ///
-    /// The consumer owns the self/other split — it knows the player id and this
-    /// crate is stateless. Routing rules, mirroring the daemon:
+    /// A stateful session owns the self/other split. Direct backend callers may
+    /// still inspect this wire-shaped compatibility variant. Routing rules:
     ///   * HP is meaningful only when `has_hp && hp_max > 0`. For the self it is
     ///     real cur/max; for other spawns the narrow form is a percentage.
     ///   * mana/endurance are the local player's only, and only when `wide` —
@@ -357,15 +428,13 @@ pub enum Event {
         end_cur: i32,
         end_max: i32,
     },
-    /// The local player moved (OP_ClientUpdate self position).
+    /// Low-level OP_ClientUpdate result retained for direct backend callers. A
+    /// stateful session emits [`Event::PlayerMoved`].
     ///
     /// `spawn_id` is the id the client stamps on its own outbound report. It is
     /// carried here because it is the only self-identifying field that keeps
-    /// arriving mid-session, when no zone-in was witnessed and nothing else can
-    /// tell a host which spawn is the player — see
-    /// `seq_backend_eql::SelfTracker::observe_self_pos`. It is NOT an adoption
-    /// on its own (on eql it names the phantom twin); route it through the
-    /// tracker rather than pinning the player to it.
+    /// arriving mid-session. On EQL it names the phantom twin, so only the
+    /// session may adopt it.
     SelfPos { pos: Pos, spawn_id: u32 },
     /// A spawn changed pose/animation (OP_SpawnAppearance2 type 6: 110=sit,
     /// 100=stand, 111=duck). Only the pose subtype is surfaced — other
@@ -475,11 +544,11 @@ pub enum Event {
         rank_index: u32,
         rank_name: String,
     },
-    /// A player switched multiclass loadouts (eql OP_LoadoutSwap), changing
+    /// Low-level eql OP_LoadoutSwap result retained for direct backend callers.
+    /// A stateful session emits a player or spawn identity update, changing
     /// their class + level. eql sends no OP_PlayerProfile on a swap, so this is
-    /// the sole source of the new identity. The consumer owns the self/other
-    /// split (it knows the player id): the self → refresh identity + its player
-    /// snapshot; another spawn → update that spawn's class/level in place.
+    /// the sole source of the new identity. The session owns the self/other
+    /// split.
     /// `class` is the single resolved class, not the multiclass mask.
     LoadoutSwap {
         spawn_id: u32,

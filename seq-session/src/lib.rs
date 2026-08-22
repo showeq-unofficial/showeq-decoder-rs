@@ -16,7 +16,10 @@ compile_error!("seq-session: backend-live and backend-test use different struct 
 use seq_backend_eql::{backend::EqlBackend, LootTracker, SelfTracker};
 #[cfg(any(feature = "backend-live", feature = "backend-test"))]
 use seq_backend_live::LiveBackend;
-use seq_events::{Backend, Decoded, SessionResetReason};
+use seq_events::{
+    Backend, Decoded, PlayerAppearance, PlayerIdentity, PlayerVitals, SessionResetReason,
+    VitalValue,
+};
 use std::{
     collections::{BTreeSet, HashMap},
     sync::Arc,
@@ -127,6 +130,9 @@ pub struct Session {
     protocol_registry: Arc<ProtocolRegistry>,
     decoder: BackendSession,
     entities: EntityIndex,
+    player_name: String,
+    player_id: Option<u32>,
+    player_identity: Option<PlayerIdentity>,
 }
 
 #[derive(Default)]
@@ -166,6 +172,11 @@ impl EntityIndex {
         (ids.len() == 1).then(|| *ids.first().expect("one name-index entry"))
     }
 
+    #[cfg(feature = "backend-eql")]
+    fn contains(&self, id: u32) -> bool {
+        self.names_by_id.contains_key(&id)
+    }
+
     fn rename(&mut self, id: u32, new_name: &str) {
         let kind = self.kinds_by_id.get(&id).copied().unwrap_or_default();
         self.remove(id);
@@ -183,6 +194,51 @@ impl EntityIndex {
         self.ids_by_name.clear();
         self.kinds_by_id.clear();
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PlayerSpawnRouting {
+    Other,
+    Player,
+    Phantom,
+}
+
+const fn nonzero(value: u32) -> Option<u32> {
+    if value == 0 {
+        None
+    } else {
+        Some(value)
+    }
+}
+
+fn u32_to_i32(value: u32) -> i32 {
+    i32::try_from(value).unwrap_or(i32::MAX)
+}
+
+#[cfg(feature = "backend-eql")]
+fn player_vitals(stat: SelfStat) -> PlayerVitals {
+    let health = (stat.has_hp && stat.hp_max > 0).then_some(VitalValue {
+        current: i64_to_i32(stat.hp_cur),
+        maximum: Some(i64_to_i32(stat.hp_max)),
+    });
+    let mana = stat.has_mana.then_some(VitalValue {
+        current: i64_to_i32(stat.mana_cur),
+        maximum: Some(i64_to_i32(stat.mana_max)),
+    });
+    let endurance = stat.has_end.then_some(VitalValue {
+        current: i64_to_i32(stat.end_cur),
+        maximum: Some(i64_to_i32(stat.end_max)),
+    });
+    PlayerVitals {
+        health,
+        mana,
+        endurance,
+    }
+}
+
+#[cfg(feature = "backend-eql")]
+fn i64_to_i32(value: i64) -> i32 {
+    value.clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32
 }
 
 impl Session {
@@ -204,6 +260,9 @@ impl Session {
             protocol_registry: config.protocol_registry,
             decoder,
             entities: EntityIndex::default(),
+            player_name: String::new(),
+            player_id: None,
+            player_identity: None,
         }
     }
 
@@ -323,7 +382,7 @@ impl Session {
         };
 
         let mut output = Vec::with_capacity(events.len() + 1);
-        for mut event in events {
+        for event in events {
             let reset = match &event {
                 Event::EnterWorld { .. } => Some(SessionResetReason::EnterWorld),
                 Event::PlayerProfile(_) => Some(SessionResetReason::PlayerProfile),
@@ -337,13 +396,386 @@ impl Session {
                 output.push(Event::SessionReset { reason });
             }
 
-            self.apply_entity_semantics(&mut event);
-
-            self.decoder
-                .observe_event(&event, opcode_name, direction, payload, timestamp);
-            output.push(event);
+            for mut event in self.apply_player_semantics(event, opcode_name, direction) {
+                self.apply_entity_semantics(&mut event);
+                self.decoder
+                    .observe_event(&event, opcode_name, direction, payload, timestamp);
+                output.push(event);
+            }
         }
         Decoded::Many(output)
+    }
+
+    #[allow(clippy::too_many_lines, irrefutable_let_patterns)]
+    fn apply_player_semantics(
+        &mut self,
+        event: Event,
+        opcode_name: &str,
+        direction: Direction,
+    ) -> Vec<Event> {
+        match event {
+            Event::EnterWorld { character_name } => {
+                if self.player_name != character_name {
+                    self.player_identity = None;
+                }
+                self.player_name.clone_from(&character_name);
+                vec![Event::EnterWorld { character_name }]
+            }
+            Event::PlayerProfile(profile) => {
+                self.player_name.clone_from(&profile.name);
+                let identity = PlayerIdentity {
+                    spawn_id: None,
+                    name: profile.name.clone(),
+                    last_name: profile.last_name.clone(),
+                    race: profile.race,
+                    class_: profile.class_,
+                    deity: profile.deity,
+                    level: u32::from(profile.level),
+                    class_mask: profile.class_mask,
+                };
+                self.player_identity = Some(identity.clone());
+                let vitals = PlayerVitals {
+                    health: Some(VitalValue {
+                        current: u32_to_i32(profile.cur_hp),
+                        maximum: None,
+                    }),
+                    mana: Some(VitalValue {
+                        current: u32_to_i32(profile.mana),
+                        maximum: None,
+                    }),
+                    endurance: None,
+                };
+                vec![
+                    Event::PlayerProfile(profile),
+                    Event::PlayerIdentityUpdated(identity),
+                    Event::PlayerVitalsUpdated(vitals),
+                ]
+            }
+            Event::SpawnAdded(spawn) => self.apply_spawn_identity(spawn, opcode_name),
+            Event::SelfPos { pos, spawn_id } => {
+                if direction != Dir::ClientToServer {
+                    return vec![Event::SpawnMoved { id: spawn_id, pos }];
+                }
+
+                #[cfg(feature = "backend-eql")]
+                if let BackendSession::Eql(state) = &mut self.decoder {
+                    state.self_tracker.observe_self_pos(spawn_id);
+                    let resolved = nonzero(state.self_tracker.self_id());
+                    self.player_id = resolved;
+                    return vec![Event::PlayerMoved {
+                        spawn_id: resolved,
+                        pos,
+                    }];
+                }
+
+                self.player_id = nonzero(spawn_id);
+                self.update_identity_id();
+                vec![Event::PlayerMoved {
+                    spawn_id: self.player_id,
+                    pos,
+                }]
+            }
+            Event::SpawnHp { id, cur, max } => {
+                if self.is_player_id(id) {
+                    vec![Event::PlayerVitalsUpdated(PlayerVitals {
+                        health: Some(VitalValue {
+                            current: cur,
+                            maximum: Some(max),
+                        }),
+                        ..PlayerVitals::default()
+                    })]
+                } else {
+                    vec![Event::SpawnHealthUpdated {
+                        id,
+                        current: cur,
+                        maximum: max,
+                    }]
+                }
+            }
+            Event::StatSync {
+                spawn_id,
+                wide,
+                has_hp,
+                hp_cur,
+                hp_max,
+                has_mana,
+                mana_cur,
+                mana_max,
+                has_end,
+                end_cur,
+                end_max,
+            } => self.apply_stat_sync(
+                spawn_id, wide, has_hp, hp_cur, hp_max, has_mana, mana_cur, mana_max, has_end,
+                end_cur, end_max,
+            ),
+            Event::ManaUpdate { mana } => vec![Event::PlayerVitalsUpdated(PlayerVitals {
+                mana: Some(VitalValue {
+                    current: u32_to_i32(mana),
+                    maximum: None,
+                }),
+                ..PlayerVitals::default()
+            })],
+            Event::SpawnKilled {
+                deceased_id,
+                killer_id,
+            } => {
+                let killer_id = nonzero(killer_id);
+                if self.is_player_id(deceased_id) {
+                    self.clear_player_id();
+                    vec![Event::PlayerDied { killer_id }]
+                } else {
+                    vec![Event::SpawnDied {
+                        id: deceased_id,
+                        killer_id,
+                    }]
+                }
+            }
+            Event::LoadoutSwap {
+                spawn_id,
+                level,
+                class,
+                race,
+            } => {
+                if self.is_player_id(spawn_id) {
+                    let identity = self.update_player_loadout(level, class, race);
+                    vec![Event::PlayerIdentityUpdated(identity)]
+                } else {
+                    vec![Event::SpawnIdentityUpdated {
+                        id: spawn_id,
+                        level,
+                        class_: class,
+                        race,
+                    }]
+                }
+            }
+            Event::SpawnAnimation {
+                spawn_id,
+                animation,
+            } if self.is_player_id(spawn_id) => {
+                vec![Event::PlayerAppearanceUpdated(PlayerAppearance {
+                    animation: Some(animation),
+                    ..PlayerAppearance::default()
+                })]
+            }
+            Event::SpawnIllusion {
+                spawn_id,
+                race,
+                gender,
+            } if self.is_player_id(spawn_id) => {
+                if let Some(identity) = &mut self.player_identity {
+                    identity.race = race;
+                }
+                vec![Event::PlayerAppearanceUpdated(PlayerAppearance {
+                    race: Some(race),
+                    gender: Some(gender),
+                    animation: None,
+                })]
+            }
+            other => vec![other],
+        }
+    }
+
+    fn apply_spawn_identity(
+        &mut self,
+        spawn: seq_events::SpawnInfo,
+        opcode_name: &str,
+    ) -> Vec<Event> {
+        let routing = self.classify_spawn(&spawn);
+        if routing == PlayerSpawnRouting::Other {
+            return vec![Event::SpawnAdded(spawn)];
+        }
+
+        if routing == PlayerSpawnRouting::Phantom {
+            return self.take_pending_player_vitals();
+        }
+
+        self.player_id = Some(spawn.id);
+        let identity = PlayerIdentity {
+            spawn_id: Some(spawn.id),
+            name: spawn.name,
+            last_name: spawn.last_name,
+            race: spawn.race,
+            class_: spawn.class_,
+            deity: spawn.deity,
+            level: u32::from(spawn.level),
+            class_mask: spawn.class_mask,
+        };
+        self.player_identity = Some(identity.clone());
+
+        let mut output = Vec::with_capacity(4);
+        if opcode_name != "OP_LoadoutSwap" {
+            output.push(Event::PlayerIdentityUpdated(identity));
+        }
+        if let Some(pos) = spawn.pos {
+            output.push(Event::PlayerMoved {
+                spawn_id: self.player_id,
+                pos,
+            });
+        }
+        if let Some(maximum) = spawn.max_hp {
+            output.push(Event::PlayerVitalsUpdated(PlayerVitals {
+                health: Some(VitalValue {
+                    current: u32_to_i32(spawn.cur_hp),
+                    maximum: Some(u32_to_i32(maximum)),
+                }),
+                ..PlayerVitals::default()
+            }));
+        }
+        output.extend(self.take_pending_player_vitals());
+        output
+    }
+
+    #[allow(irrefutable_let_patterns)]
+    fn classify_spawn(&mut self, spawn: &seq_events::SpawnInfo) -> PlayerSpawnRouting {
+        #[cfg(feature = "backend-eql")]
+        if let BackendSession::Eql(state) = &mut self.decoder {
+            return match state
+                .self_tracker
+                .observe_spawn(&self.player_name, &spawn.name, spawn.id)
+            {
+                seq_backend_eql::SpawnRouting::NotSelf => PlayerSpawnRouting::Other,
+                seq_backend_eql::SpawnRouting::AdoptSelf => PlayerSpawnRouting::Player,
+                seq_backend_eql::SpawnRouting::SelfTwin => PlayerSpawnRouting::Phantom,
+            };
+        }
+
+        if !self.player_name.is_empty() && spawn.name == self.player_name {
+            PlayerSpawnRouting::Player
+        } else {
+            PlayerSpawnRouting::Other
+        }
+    }
+
+    #[allow(clippy::too_many_arguments, irrefutable_let_patterns)]
+    fn apply_stat_sync(
+        &mut self,
+        spawn_id: u32,
+        wide: bool,
+        has_hp: bool,
+        hp_cur: i32,
+        hp_max: i32,
+        has_mana: bool,
+        mana_cur: i32,
+        mana_max: i32,
+        has_end: bool,
+        end_cur: i32,
+        end_max: i32,
+    ) -> Vec<Event> {
+        #[cfg(feature = "backend-eql")]
+        if let BackendSession::Eql(state) = &mut self.decoder {
+            let stat = seq_backend_eql::StatSync {
+                spawn_id,
+                wide,
+                has_hp,
+                hp_cur: i64::from(hp_cur),
+                hp_max: i64::from(hp_max),
+                has_mana: wide && has_mana,
+                mana_cur: i64::from(mana_cur),
+                mana_max: i64::from(mana_max),
+                has_end: wide && has_end,
+                end_cur: i64::from(end_cur),
+                end_max: i64::from(end_max),
+            };
+            let routed = state.self_tracker.observe_stat_sync(&stat);
+            if routed.is_self {
+                if routed.any() {
+                    state.self_stats.push(routed);
+                }
+                let vitals = player_vitals(routed);
+                return vitals
+                    .any()
+                    .then_some(Event::PlayerVitalsUpdated(vitals))
+                    .into_iter()
+                    .collect();
+            }
+            if has_hp && hp_max > 0 && self.entities.contains(spawn_id) {
+                return vec![Event::SpawnHealthUpdated {
+                    id: spawn_id,
+                    current: hp_cur,
+                    maximum: hp_max,
+                }];
+            }
+            return Vec::new();
+        }
+
+        #[cfg(not(feature = "backend-eql"))]
+        let _ = (
+            wide, has_mana, mana_cur, mana_max, has_end, end_cur, end_max,
+        );
+
+        if has_hp && hp_max > 0 {
+            vec![Event::SpawnHealthUpdated {
+                id: spawn_id,
+                current: hp_cur,
+                maximum: hp_max,
+            }]
+        } else {
+            Vec::new()
+        }
+    }
+
+    #[allow(irrefutable_let_patterns)]
+    fn take_pending_player_vitals(&mut self) -> Vec<Event> {
+        #[cfg(feature = "backend-eql")]
+        if let BackendSession::Eql(state) = &mut self.decoder {
+            let pending = state.self_tracker.take_pending_vitals();
+            if pending.any() {
+                state.self_stats.push(pending);
+            }
+            let vitals = player_vitals(pending);
+            return vitals
+                .any()
+                .then_some(Event::PlayerVitalsUpdated(vitals))
+                .into_iter()
+                .collect();
+        }
+        Vec::new()
+    }
+
+    #[allow(irrefutable_let_patterns)]
+    fn is_player_id(&self, id: u32) -> bool {
+        if self.player_id == Some(id) {
+            return true;
+        }
+        #[cfg(feature = "backend-eql")]
+        if let BackendSession::Eql(state) = &self.decoder {
+            return state.self_tracker.is_self(id);
+        }
+        false
+    }
+
+    fn update_identity_id(&mut self) {
+        if let Some(identity) = &mut self.player_identity {
+            identity.spawn_id = self.player_id;
+        }
+    }
+
+    #[allow(irrefutable_let_patterns)]
+    fn clear_player_id(&mut self) {
+        self.player_id = None;
+        self.update_identity_id();
+        #[cfg(feature = "backend-eql")]
+        if let BackendSession::Eql(state) = &mut self.decoder {
+            state.self_tracker.reset();
+        }
+    }
+
+    fn update_player_loadout(&mut self, level: u32, class_: u32, race: u32) -> PlayerIdentity {
+        let identity = self.player_identity.get_or_insert_with(|| PlayerIdentity {
+            spawn_id: self.player_id,
+            name: self.player_name.clone(),
+            last_name: String::new(),
+            race,
+            class_,
+            deity: 0,
+            level,
+            class_mask: 0,
+        });
+        identity.spawn_id = self.player_id;
+        identity.level = level;
+        identity.class_ = class_;
+        identity.race = race;
+        identity.clone()
     }
 
     fn apply_entity_semantics(&mut self, event: &mut Event) {
@@ -370,6 +802,8 @@ impl Session {
 
     fn reset_correlations(&mut self) {
         self.entities.clear();
+        self.player_id = None;
+        self.update_identity_id();
         match &mut self.decoder {
             #[cfg(feature = "backend-eql")]
             BackendSession::Eql(state) => {
@@ -398,51 +832,6 @@ impl EqlSession {
             Event::PlayerProfile(profile) => {
                 self.player_name.clone_from(&profile.name);
                 self.loot_tracker.set_looter(&profile.name);
-            }
-            Event::SpawnAdded(spawn) => {
-                self.self_tracker
-                    .observe_spawn(&self.player_name, &spawn.name, spawn.id);
-                let pending = self.self_tracker.take_pending_vitals();
-                if pending.any() {
-                    self.self_stats.push(pending);
-                }
-            }
-            Event::SelfPos { spawn_id, .. } if direction == Dir::ClientToServer => {
-                self.self_tracker.observe_self_pos(*spawn_id);
-            }
-            Event::StatSync {
-                spawn_id,
-                wide,
-                has_hp,
-                hp_cur,
-                hp_max,
-                has_mana,
-                mana_cur,
-                mana_max,
-                has_end,
-                end_cur,
-                end_max,
-            } => {
-                let stat = seq_backend_eql::StatSync {
-                    spawn_id: *spawn_id,
-                    wide: *wide,
-                    has_hp: *has_hp,
-                    hp_cur: i64::from(*hp_cur),
-                    hp_max: i64::from(*hp_max),
-                    has_mana: *has_mana,
-                    mana_cur: i64::from(*mana_cur),
-                    mana_max: i64::from(*mana_max),
-                    has_end: *has_end,
-                    end_cur: i64::from(*end_cur),
-                    end_max: i64::from(*end_max),
-                };
-                let routed = self.self_tracker.observe_stat_sync(&stat);
-                if routed.is_self && routed.any() {
-                    self.self_stats.push(routed);
-                }
-            }
-            Event::SpawnKilled { deceased_id, .. } if self.self_tracker.is_self(*deceased_id) => {
-                self.self_tracker.reset();
             }
             Event::ZoneChanged(zone) => {
                 self.loot_rows
@@ -603,7 +992,7 @@ mod tests {
         assert_eq!(batch.disposition, DecodeDisposition::Decoded);
         assert!(matches!(
             batch.events.as_slice(),
-            [Event::SelfPos { spawn_id: 77, .. }]
+            [Event::PlayerMoved { spawn_id: None, .. }]
         ));
         assert_eq!(session.self_identity().provisional_id, 77);
 
@@ -699,7 +1088,28 @@ mod tests {
                 Event::SessionReset {
                     reason: SessionResetReason::PlayerProfile,
                 },
-                Event::PlayerProfile(profile),
+                Event::PlayerProfile(profile.clone()),
+                Event::PlayerIdentityUpdated(PlayerIdentity {
+                    spawn_id: None,
+                    name: "Firona".into(),
+                    last_name: String::new(),
+                    race: 3,
+                    class_: 1,
+                    deity: 4,
+                    level: 2,
+                    class_mask: 0,
+                }),
+                Event::PlayerVitalsUpdated(PlayerVitals {
+                    health: Some(VitalValue {
+                        current: 5,
+                        maximum: None,
+                    }),
+                    mana: Some(VitalValue {
+                        current: 6,
+                        maximum: None,
+                    }),
+                    endurance: None,
+                }),
             ])
         );
         assert_eq!(session.self_identity(), SelfIdentity::default());
@@ -920,5 +1330,79 @@ mod tests {
         entities.corpse_position(100, &mut position);
         assert_eq!(position.x, 4.25);
         assert_eq!(position.y, 5.5);
+    }
+
+    #[test]
+    fn loadout_and_zone_boundaries_keep_identity_semantic() {
+        let registry = Arc::new(ProtocolRegistry::embedded().unwrap());
+        let mut session = eql_session(registry);
+        let profile = profile("Firona");
+        session.apply_session_semantics(
+            Decoded::One(Event::PlayerProfile(profile)),
+            "OP_PlayerProfile",
+            Dir::ServerToClient,
+            &[],
+            0,
+        );
+        let spawn = seq_events::SpawnInfo {
+            id: 500,
+            name: "Firona".into(),
+            last_name: "Vie".into(),
+            race: 1,
+            class_: 2,
+            deity: 3,
+            level: 4,
+            npc: 0,
+            cur_hp: 90,
+            max_hp: Some(100),
+            guild_id: 0,
+            guild_server_id: 0,
+            class_mask: 4,
+            pos: None,
+        };
+        session.apply_session_semantics(
+            Decoded::One(Event::SpawnAdded(spawn)),
+            "OP_ZoneEntry",
+            Dir::ServerToClient,
+            &[],
+            0,
+        );
+
+        let changed = session.apply_session_semantics(
+            Decoded::One(Event::LoadoutSwap {
+                spawn_id: 500,
+                level: 60,
+                class: 8,
+                race: 9,
+            }),
+            "OP_LoadoutSwap",
+            Dir::ServerToClient,
+            &[],
+            0,
+        );
+        assert!(matches!(
+            changed,
+            Decoded::Many(events)
+                if matches!(events.as_slice(), [Event::PlayerIdentityUpdated(identity)]
+                    if identity.spawn_id == Some(500)
+                        && identity.level == 60
+                        && identity.class_ == 8
+                        && identity.race == 9)
+        ));
+
+        assert_eq!(
+            session.flush(FlushReason::ZoneTransition),
+            vec![Event::SessionReset {
+                reason: SessionResetReason::ZoneTransition,
+            }]
+        );
+        assert_eq!(session.player_id, None);
+        assert_eq!(
+            session
+                .player_identity
+                .as_ref()
+                .and_then(|identity| identity.spawn_id),
+            None
+        );
     }
 }

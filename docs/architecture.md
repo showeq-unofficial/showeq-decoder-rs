@@ -62,7 +62,12 @@ previous generation active.
 
 `seq-session` is the new host entry point. It accepts numeric opcodes, records
 the protocol generation on every `DecodeBatch`, dispatches to the immutable
-backend selected at construction, and owns EQL self and loot trackers. The
+backend selected at construction, and owns EQL self and loot trackers. It also
+turns backend wire events into player-family events. `PlayerMoved`, partial
+`PlayerVitalsUpdated`, `PlayerDied`, and the player identity and appearance
+events are final meanings. Other entities use `SpawnHealthUpdated`,
+`SpawnIdentityUpdated`, and `SpawnDied`. Zero-valued killer ids become absent
+values, and an unresolved player spawn id stays absent. The
 existing name-based `Backend::decode`, opcode-specific C++ bridge, and public
 standalone tracker APIs remain intact during shadow migration.
 
@@ -186,8 +191,8 @@ offset parser in `seq-backend-eql` is the fallback, not the starting point.
 
 ## Self-identity tracking (`seq-backend-eql::SelfTracker`)
 
-Self-identity has THREE tiers, and only `SelfTracker` (`self_track.rs`) may
-rank them — hosts apply its verdicts, they never decide:
+Self-identity has three tiers, and only `SelfTracker` (`self_track.rs`) ranks
+them. `seq-session` applies its verdicts. Hosts receive final player events.
 
 1. **`observe_spawn`** — a name-match on a self-named `OP_ZoneEntry` is
    authoritative and adopts the LIVE copy.
@@ -197,17 +202,13 @@ rank them — hosts apply its verdicts, they never decide:
 3. A wide stat-sync carrying mana or endurance, which ride that channel for
    the player ONLY.
 
-Tiers 2–3 adopt *provisionally* and exist for one case: a host attaching
-MID-SESSION sees no `OP_PlayerProfile` and no ZoneEntry burst, so tier 1 can
-never fire and the player is invisible — no dot, no spawn row, no stat
-attribution — until they zone. A provisional id is the phantom twin's, so
-it must never displace a name match; when one lands, the tracker hands the
-superseded id back via `take_retired_provisional()` and the host drops
-whatever it synthesised for it. Tier 2 is the one that carries coordinates,
-so it's the only one that asks a host to synthesise a record; tier 3 is
-attribution only (it makes vitals land while the player stands still).
-`Event::SelfPos` carries `spawn_id` for exactly this — don't pin a player to
-it directly.
+Tiers 2 and 3 are provisional and handle mid-session attachment, where no
+profile or zone-entry burst was observed. A provisional id is the phantom
+twin's and never displaces a name match. The session reports the position as
+`PlayerMoved { spawn_id: None, ... }` until it resolves the real moving id. It
+does not create a synthetic spawn. Wide vitals received before the twin record
+are held and emitted once the tracker confirms ownership. Zone boundaries and
+player death clear every provisional and twin id.
 
 ## Entity identity and spatial state
 

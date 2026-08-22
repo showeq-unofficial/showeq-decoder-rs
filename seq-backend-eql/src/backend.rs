@@ -214,9 +214,9 @@ fn spawn_rename(bytes: &[u8]) -> Decoded {
     }
 }
 
-// OP_Death (newCorpseStruct): the deceased becomes a corpse, not a removal. The
-// caller owns the self-death case (it knows the player id) — see SpawnShell::
-// killSpawn / EqlDispatch::death.
+// OP_Death (newCorpseStruct): the deceased becomes a corpse, not a removal.
+// seq-session resolves player ownership; direct backend callers retain this
+// low-level result during migration.
 fn death(bytes: &[u8]) -> Decoded {
     match crate::death::parse_death(bytes) {
         Ok(d) => Decoded::One(Event::SpawnKilled {
@@ -229,8 +229,8 @@ fn death(bytes: &[u8]) -> Decoded {
 
 // eql OP_HPUpdate is the multiplexed stat-sync channel: spawn HP (real for the
 // self, percent for others) plus the player's mana/endurance, all in one packet.
-// Surface it whole as StatSync and let the consumer split self from other — it
-// knows the player id and this crate is stateless. Emitting one event per packet
+// Surface it whole as StatSync and let seq-session split self from other.
+// Emitting one event per packet
 // (rather than one per stat) is deliberate: it keeps a single wire packet from
 // fanning out into several near-identical player snapshots downstream.
 fn hp_update(bytes: &[u8]) -> Decoded {
