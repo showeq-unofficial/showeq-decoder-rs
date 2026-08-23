@@ -37,7 +37,6 @@ FAMILIES = {
 HOST_STATUSES = {"rust", "legacy", "not_applicable", "missing"}
 SESSION_BRIDGE_FUNCTIONS = {
     "session_protocol_registry_new",
-    "reload",
     "content_hash",
     "session_new",
     "decode",

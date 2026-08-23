@@ -59,7 +59,6 @@ pub mod ground_spawn;
 pub mod group_disband;
 pub mod group_follow;
 pub mod group_member_list;
-pub mod group_roster;
 pub mod guild_expanded_info;
 pub mod guild_in_zone;
 pub mod guild_motd;
@@ -125,7 +124,6 @@ pub use formatted_message::{parse_formatted_message, FormattedMessage, Formatted
 pub use ground_spawn::{parse_ground_spawn, GroundSpawn, GroundSpawnError};
 pub use group_disband::{parse_group_disband, GroupDisband, GroupDisbandError};
 pub use group_follow::{parse_group_follow, GroupFollow, GroupFollowError};
-pub use group_roster::{parse_group_roster, GroupRoster, GroupRosterError};
 pub use loot_drops::{parse_loot_drops, LootDrops, LootDropsError};
 pub use loot_message::{parse_loot_message, LootMessage, LootMessageError};
 pub use loot_track::{LootRow, LootSource, LootTracker};

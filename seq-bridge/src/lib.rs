@@ -394,15 +394,6 @@ mod ffi {
         // with the ones the player put on it; only this tells them apart.
         caster: String,
     }
-    // One point in the EQL self-position breadcrumb (OP_SelfPosEQL). Game
-    // coords (not screen-negated); `ts` is a per-sample monotonic timer. Ordered
-    // oldest -> newest. An empty Vec = decode failed / not the breadcrumb.
-    struct SelfPosPoint {
-        x: f32,
-        y: f32,
-        z: f32,
-        ts: u32,
-    }
     // One EQL UCS (cross-zone chat) line. `channel_first` is the still-masked
     // first byte of the channel name; `channel_rest` is the clean remainder.
     // The caller recovers the per-session mask (from the General* crib) to
@@ -505,12 +496,6 @@ mod ffi {
         z: f32,
         ok: bool,
     }
-    struct StartCast {
-        slot: i32,
-        spell_id: u32,
-        target_id: u32,
-        ok: bool,
-    }
     struct Action {
         target: u16,
         source: u16,
@@ -532,12 +517,6 @@ mod ffi {
         group_id: u32,
         member_count: u32,
         // scanned member names, '\n'-separated (daemon splits + dedups + self-filters).
-        names: String,
-        ok: bool,
-    }
-    struct GroupRoster {
-        group_id: u32,
-        // full-roster member names, '\n'-separated (solo group = empty).
         names: String,
         ok: bool,
     }
@@ -1787,11 +1766,6 @@ mod ffi {
         fn session_protocol_registry_new(
             protocol_dir: &str,
         ) -> Result<Box<SessionProtocolRegistry>>;
-        fn reload(
-            self: &SessionProtocolRegistry,
-            backend: SessionBackend,
-            protocol_dir: &str,
-        ) -> Result<u64>;
         fn content_hash(self: &SessionProtocolRegistry, backend: SessionBackend) -> String;
 
         type SessionResource;
@@ -1830,7 +1804,6 @@ mod ffi {
         type EqlSelfTracker;
         fn eql_self_tracker_new() -> Box<EqlSelfTracker>;
         fn reset(self: &mut EqlSelfTracker);
-        fn self_id(self: &EqlSelfTracker) -> u32;
         fn observe_spawn(
             self: &mut EqlSelfTracker,
             player_name: &str,
@@ -1844,7 +1817,6 @@ mod ffi {
         // the client's own outbound position report here — 1 = newly adopted
         // provisionally (synthesise a record for it), 0 = nothing to do.
         fn observe_self_pos(self: &mut EqlSelfTracker, spawn_id: u32) -> u8;
-        fn provisional_id(self: &EqlSelfTracker) -> u32;
         // Non-zero when a real (name-matched) adoption has superseded a
         // provisional id: drop whatever was synthesised for it.
         fn take_retired_provisional(self: &mut EqlSelfTracker) -> u32;
@@ -1854,8 +1826,6 @@ mod ffi {
         // method returns the rows that COMPLETED on this event, usually none.
         type EqlLootTracker;
         fn eql_loot_tracker_new() -> Box<EqlLootTracker>;
-        fn reset(self: &mut EqlLootTracker);
-        fn set_looter(self: &mut EqlLootTracker, looter: &str);
         fn set_zone(self: &mut EqlLootTracker, zone_short: &str) -> Vec<LootRow>;
         fn on_loot_message(
             self: &mut EqlLootTracker,
@@ -1893,7 +1863,6 @@ mod ffi {
         fn decode_guild_expanded_info(bytes: &[u8]) -> GuildExpandedInfo;
         fn decode_guild_member_update(bytes: &[u8]) -> GuildMemberUpdateInfo;
         fn decode_guild_roster(bytes: &[u8]) -> Vec<GuildRosterRow>;
-        fn decode_self_pos_breadcrumb(bytes: &[u8]) -> Vec<SelfPosPoint>;
         fn decode_ucs_chat(bytes: &[u8]) -> Vec<UcsChatRecord>;
         fn decode_ucs_channels(bytes: &[u8]) -> Vec<String>;
         fn decode_mob_health(bytes: &[u8]) -> MobHealth;
@@ -1917,7 +1886,6 @@ mod ffi {
         fn decode_zone_change(bytes: &[u8]) -> ZoneChange;
         fn decode_dz_info(bytes: &[u8]) -> DzInfo;
         fn decode_dz_switch_info(bytes: &[u8]) -> DzSwitch;
-        fn decode_start_cast(bytes: &[u8]) -> StartCast;
         fn decode_begin_cast(bytes: &[u8]) -> BeginCast;
         fn decode_activate_ability(bytes: &[u8]) -> ActivateAbility;
         fn decode_aa_table_entry(bytes: &[u8]) -> AaTableEntry;
@@ -1926,7 +1894,6 @@ mod ffi {
         fn decode_group_disband(bytes: &[u8]) -> GroupDisband;
         fn decode_group_follow(bytes: &[u8]) -> GroupFollow;
         fn decode_group_member_list(bytes: &[u8]) -> GroupMemberList;
-        fn decode_group_roster(bytes: &[u8]) -> GroupRoster;
         fn decode_corpse_loc(bytes: &[u8]) -> CorpseLoc;
         // Stage A+7
         fn decode_door(bytes: &[u8]) -> Door;
@@ -1976,13 +1943,6 @@ fn session_protocol_registry_new(
 }
 
 impl SessionProtocolRegistry {
-    fn reload(&self, backend: ffi::SessionBackend, protocol_dir: &str) -> Result<u64, String> {
-        self.0
-            .reload_backend_from_directory(protocol_dir, protocol_backend(backend))
-            .map(|generation| generation.0)
-            .map_err(|error| error.to_string())
-    }
-
     fn content_hash(&self, backend: ffi::SessionBackend) -> String {
         self.0
             .snapshot(protocol_backend(backend))
@@ -4004,10 +3964,6 @@ impl EqlSelfTracker {
         self.0.reset();
     }
 
-    fn self_id(&self) -> u32 {
-        self.0.self_id()
-    }
-
     fn observe_spawn(&mut self, player_name: &str, spawn_name: &str, spawn_id: u32) -> u8 {
         self.0.observe_spawn(player_name, spawn_name, spawn_id) as u8
     }
@@ -4037,10 +3993,6 @@ impl EqlSelfTracker {
         self.0.observe_self_pos(spawn_id) as u8
     }
 
-    fn provisional_id(&self) -> u32 {
-        self.0.provisional_id()
-    }
-
     fn take_retired_provisional(&mut self) -> u32 {
         self.0.take_retired_provisional()
     }
@@ -4055,9 +4007,6 @@ fn eql_self_tracker_new() -> Box<EqlSelfTracker> {
 #[cfg(not(feature = "backend-eql"))]
 impl EqlSelfTracker {
     fn reset(&mut self) {}
-    fn self_id(&self) -> u32 {
-        0
-    }
     fn observe_spawn(&mut self, _player_name: &str, _spawn_name: &str, _spawn_id: u32) -> u8 {
         0
     }
@@ -4068,9 +4017,6 @@ impl EqlSelfTracker {
         self_stat_none()
     }
     fn observe_self_pos(&mut self, _spawn_id: u32) -> u8 {
-        0
-    }
-    fn provisional_id(&self) -> u32 {
         0
     }
     fn take_retired_provisional(&mut self) -> u32 {
@@ -4119,12 +4065,6 @@ fn loot_rows_to_ffi(rows: Vec<seq_backend_eql::LootRow>) -> Vec<ffi::LootRow> {
 
 #[cfg(feature = "backend-eql")]
 impl EqlLootTracker {
-    fn reset(&mut self) {
-        self.0.reset();
-    }
-    fn set_looter(&mut self, looter: &str) {
-        self.0.set_looter(looter);
-    }
     fn set_zone(&mut self, zone_short: &str) -> Vec<ffi::LootRow> {
         loot_rows_to_ffi(self.0.set_zone(zone_short))
     }
@@ -4179,8 +4119,6 @@ fn eql_loot_tracker_new() -> Box<EqlLootTracker> {
 
 #[cfg(not(feature = "backend-eql"))]
 impl EqlLootTracker {
-    fn reset(&mut self) {}
-    fn set_looter(&mut self, _looter: &str) {}
     fn set_zone(&mut self, _zone_short: &str) -> Vec<ffi::LootRow> {
         Vec::new()
     }
@@ -4669,28 +4607,6 @@ fn decode_buff_list(bytes: &[u8]) -> Vec<ffi::BuffListEntry> {
 
 #[cfg(not(feature = "backend-eql"))]
 fn decode_buff_list(_bytes: &[u8]) -> Vec<ffi::BuffListEntry> {
-    Vec::new()
-}
-
-// eql-only: OP_SelfPosEQL — the local player's position-history
-// breadcrumb, flattened to ordered points (empty = decode failed / not present).
-// live/test stub empty.
-#[cfg(feature = "backend-eql")]
-fn decode_self_pos_breadcrumb(bytes: &[u8]) -> Vec<ffi::SelfPosPoint> {
-    seq_backend_eql::parse_self_pos_breadcrumb(bytes)
-        .points
-        .into_iter()
-        .map(|p| ffi::SelfPosPoint {
-            x: p.x,
-            y: p.y,
-            z: p.z,
-            ts: p.ts,
-        })
-        .collect()
-}
-
-#[cfg(not(feature = "backend-eql"))]
-fn decode_self_pos_breadcrumb(_bytes: &[u8]) -> Vec<ffi::SelfPosPoint> {
     Vec::new()
 }
 
@@ -5235,23 +5151,6 @@ fn decode_dz_switch_info(bytes: &[u8]) -> ffi::DzSwitch {
     }
 }
 
-fn decode_start_cast(bytes: &[u8]) -> ffi::StartCast {
-    match backend::parse_start_cast(bytes) {
-        Ok(s) => ffi::StartCast {
-            slot: s.slot,
-            spell_id: s.spell_id,
-            target_id: s.target_id,
-            ok: true,
-        },
-        Err(_) => ffi::StartCast {
-            slot: 0,
-            spell_id: 0,
-            target_id: 0,
-            ok: false,
-        },
-    }
-}
-
 fn decode_action(bytes: &[u8]) -> ffi::Action {
     match backend::parse_action(bytes) {
         Ok(a) => ffi::Action {
@@ -5319,31 +5218,6 @@ fn decode_group_follow(bytes: &[u8]) -> ffi::GroupFollow {
             name: String::new(),
             ok: false,
         },
-    }
-}
-
-// OP_GroupUpdate full roster — eql-only (the legends variable-length format).
-#[cfg(feature = "backend-eql")]
-fn decode_group_roster(bytes: &[u8]) -> ffi::GroupRoster {
-    match seq_backend_eql::parse_group_roster(bytes) {
-        Ok(g) => ffi::GroupRoster {
-            group_id: g.group_id,
-            names: g.members.join("\n"),
-            ok: true,
-        },
-        Err(_) => ffi::GroupRoster {
-            group_id: 0,
-            names: String::new(),
-            ok: false,
-        },
-    }
-}
-#[cfg(not(feature = "backend-eql"))]
-fn decode_group_roster(_bytes: &[u8]) -> ffi::GroupRoster {
-    ffi::GroupRoster {
-        group_id: 0,
-        names: String::new(),
-        ok: false,
     }
 }
 
