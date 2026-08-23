@@ -1,0 +1,29 @@
+[package]
+name = "seq-trace"
+description = "Versioned application-packet traces and deterministic seq-session replay"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[features]
+default = ["backend-live", "backend-eql"]
+backend-live = ["seq-session/backend-live"]
+backend-test = ["seq-session/backend-test"]
+backend-eql = ["seq-session/backend-eql"]
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+seq-events.workspace = true
+seq-protocol-data.workspace = true
+seq-session = { workspace = true, default-features = false }
+thiserror.workspace = true
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "seq-trace"
+path = "src/main.rs"

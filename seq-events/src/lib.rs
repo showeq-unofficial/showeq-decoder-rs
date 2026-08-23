@@ -10,8 +10,10 @@
 //! shared neutral math — so a backend depending on it is never coupled to
 //! another server's parsers.
 
+use serde::Serialize;
+
 /// Packet direction on the wire.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum Dir {
     /// Server → client (spawns, zone, profile, …).
     ServerToClient,
@@ -20,7 +22,7 @@ pub enum Dir {
 }
 
 /// A world position in EQ coordinates; heading already normalized to degrees.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct Pos {
     pub x: i32,
     pub y: i32,
@@ -33,7 +35,7 @@ pub struct Pos {
 /// units. Each component is optional because the compact movement wire may
 /// update only a subset. Absence is a protocol fact; compatibility projectors
 /// decide whether their older public format should emit zero for it.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
 pub struct Velocity {
     pub x: Option<i32>,
     pub y: Option<i32>,
@@ -42,7 +44,7 @@ pub struct Velocity {
 
 /// One absolute vital value. Some packets carry only the current value, so a
 /// maximum is optional rather than synthesized from a host convention.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct VitalValue {
     pub current: i32,
     pub maximum: Option<i32>,
@@ -52,7 +54,7 @@ pub struct VitalValue {
 ///
 /// `None` means that the packet did not carry that resource. Consumers merge
 /// the present fields into their current player snapshot.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
 pub struct PlayerVitals {
     pub health: Option<VitalValue>,
     pub mana: Option<VitalValue>,
@@ -68,7 +70,7 @@ impl PlayerVitals {
 /// Current local-player identity fields. `spawn_id` is absent until the
 /// ordered session has resolved the real moving spawn. In particular, an EQL
 /// phantom-twin id is never exposed here.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct PlayerIdentity {
     pub spawn_id: Option<u32>,
     pub name: String,
@@ -81,7 +83,7 @@ pub struct PlayerIdentity {
 }
 
 /// A partial local-player appearance update.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
 pub struct PlayerAppearance {
     pub race: Option<u32>,
     pub gender: Option<u8>,
@@ -93,7 +95,7 @@ pub struct PlayerAppearance {
 /// Host projectors may round these values for an older public contract. Rust
 /// keeps the decoded coordinates so that compatibility policy does not become
 /// shared game state.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
 pub struct Point3 {
     pub x: f32,
     pub y: f32,
@@ -101,7 +103,7 @@ pub struct Point3 {
 }
 
 /// A spawn (NPC, PC, or corpse) entering the zone.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct SpawnInfo {
     pub id: u32,
     pub name: String,
@@ -140,7 +142,7 @@ pub struct SpawnInfo {
 }
 
 /// The local player's character profile (self identity + vitals).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ProfileInfo {
     pub name: String,
     pub last_name: String,
@@ -185,7 +187,7 @@ pub struct ProfileInfo {
 }
 
 /// Zone identity from OP_NewZone.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ZoneInfo {
     pub short_name: String,
     pub long_name: String,
@@ -196,7 +198,7 @@ pub struct ZoneInfo {
 /// This is separate from [`ZoneInfo`] because clients can switch maps as soon as
 /// the names arrive, while consumers that do not model safe points or experience
 /// modifiers may explicitly ignore this event.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct ZoneEnvironment {
     pub zone_file: String,
     pub experience_multiplier: f32,
@@ -206,7 +208,7 @@ pub struct ZoneEnvironment {
 }
 
 /// Why the session discarded state that cannot survive a lifecycle boundary.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[repr(u8)]
 pub enum SessionResetReason {
     EnterWorld = 0,
@@ -216,7 +218,7 @@ pub enum SessionResetReason {
 }
 
 /// One active-buff entry from an OP_BuffList (belongs to the list's owner spawn).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct BuffEntry {
     pub spell_id: u32,
     /// Server-side remaining duration in ticks; `<= 0` = permanent.
@@ -234,7 +236,7 @@ pub struct BuffEntry {
 ///
 /// Spell names, icons, beneficial flags, and level-scaled durations belong to
 /// host spell databases. The shared event keeps only facts present on the wire.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ActiveBuff {
     /// The affected spawn. Absent means the session attached before it could
     /// resolve the local player's spawn id.
@@ -251,7 +253,7 @@ pub struct ActiveBuff {
 }
 
 /// Why an in-progress cast ended without a matching action or damage event.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[repr(u8)]
 pub enum CastInterruptionReason {
     /// The server sent a spell-failure or interruption message.
@@ -268,7 +270,7 @@ pub enum CastInterruptionReason {
 
 /// One lootable item on a corpse (OP_LootDrops). `item_id` is parsed from the
 /// item-link header; `icon` is the dragitem-atlas id.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct LootItemInfo {
     pub name: String,
     pub icon: u32,
@@ -281,7 +283,7 @@ pub struct LootItemInfo {
 /// `complete` is false at a reset, replay end, or shutdown when only one half
 /// reached the session. Optional ids preserve that distinction without making
 /// a host interpret zero sentinels.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct LootAcquisition {
     pub timestamp: i64,
     pub item_name: String,
@@ -306,7 +308,7 @@ pub struct LootAcquisition {
 
 /// Final meaning of one corpse-loot window after per-corpse duplicate
 /// suppression. Reopening an unchanged corpse emits no second snapshot.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct CorpseLootSnapshot {
     pub timestamp: i64,
     pub corpse_id: u32,
@@ -324,7 +326,7 @@ pub struct CorpseLootSnapshot {
 /// are the sole source of the NAME, so a consumer keys its guild map on the
 /// pair. `server_id` is part of the key, not decoration: ids are only unique
 /// within a guild server.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct GuildInZone {
     pub guild_id: u32,
     pub server_id: u32,
@@ -347,7 +349,7 @@ pub const MAX_WORN_SLOT: u16 = 22;
 /// tooltip was displaying modified rather than base values. The five resists
 /// keep slot order, since the tooltipped item carries the same value in all
 /// five and nothing yet distinguishes them.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ItemTemplate {
     pub serial: String,
     pub name: String,
@@ -397,7 +399,7 @@ pub struct ItemTemplate {
 
 /// A normalized item location. It is copied out separately on move events so
 /// a reducer can vacate the old equipment slot before applying the new item.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct ItemLocation {
     pub container_id: u32,
     pub container_slot: u16,
@@ -415,7 +417,7 @@ impl ItemTemplate {
 }
 
 /// The carried purse without any host-specific total or display formatting.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct MoneyBalance {
     pub platinum: u32,
     pub gold: u32,
@@ -424,7 +426,7 @@ pub struct MoneyBalance {
 }
 
 /// One learned skill and its absolute value.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct SkillValue {
     pub skill_id: u32,
     pub value: u32,
@@ -432,7 +434,7 @@ pub struct SkillValue {
 
 /// The regular per-level experience bar and the level it belongs to when the
 /// ordered session knows it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct ExperienceProgress {
     pub experience: u32,
     pub level: Option<u32>,
@@ -441,14 +443,14 @@ pub struct ExperienceProgress {
 }
 
 /// One purchased alternate-advancement ability and its absolute rank.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct AlternateAbilityRank {
     pub ability_id: u32,
     pub rank: u32,
 }
 
 /// Player AA state from an authoritative profile snapshot.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct AlternateAdvancementSnapshot {
     pub purchased: Vec<AlternateAbilityRank>,
     /// EQL does not carry these two counters independently.
@@ -459,14 +461,14 @@ pub struct AlternateAdvancementSnapshot {
 }
 
 /// Incremental AA bar and unspent-point state.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct AlternateAdvancementProgress {
     pub experience: u32,
     pub unspent_points: u32,
 }
 
 /// One mapping from an AA rank id to its localized title string id.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct AlternateAbilityDefinition {
     pub ability_id: u32,
     pub title_string_id: u32,
@@ -487,7 +489,7 @@ impl ItemTemplate {
 /// primary (lowest set bit of `class_mask`); `banker`/`alt` are the two flags
 /// split from the wire's packed field. `zone_id` 0 = offline; `last_on` is unix
 /// seconds (0 = never).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct GuildRosterMember {
     pub name: String,
     pub level: u32,
@@ -505,7 +507,7 @@ pub struct GuildRosterMember {
 /// Where a final chat line came from. The source matters for projection because
 /// localized server messages still need the host's eqstr table, while all other
 /// forms already carry display text.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[repr(u8)]
 pub enum ChatMessageKind {
     Common = 0,
@@ -523,7 +525,7 @@ pub enum ChatMessageKind {
 /// database. Rust still owns channel selection, arguments, link-cleaned direct
 /// text, target-name correlation, UCS channel recovery, spam marking, and
 /// direction de-duplication.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ChatMessage {
     pub kind: ChatMessageKind,
     pub channel: u32,
@@ -538,7 +540,7 @@ pub struct ChatMessage {
 
 /// One stable peer slot in the local player's group. The local player is not
 /// included, matching the five-peer seq.v1 contract.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct GroupMember {
     pub slot: u8,
     pub name: String,
@@ -549,7 +551,7 @@ pub struct GroupMember {
 /// Current group knowledge after applying a full roster or an incremental
 /// follow/disband packet. `complete` is false after a cold attachment or reset
 /// until the session observes a structurally complete roster.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct GroupRosterState {
     pub group_id: Option<u32>,
     pub members: Vec<GroupMember>,
@@ -558,7 +560,7 @@ pub struct GroupRosterState {
 
 /// Current guild roster knowledge. A status delta is merged into the last full
 /// roster before this event is emitted.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct GuildRosterState {
     pub guild_id: u32,
     pub members: Vec<GuildRosterMember>,
@@ -566,7 +568,7 @@ pub struct GuildRosterState {
 }
 
 /// The guild message of the day with the roster-correlated guild id.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct GuildMotdState {
     pub guild_id: u32,
     pub message: String,
@@ -574,14 +576,14 @@ pub struct GuildMotdState {
 }
 
 /// One accumulated guild rank-name entry.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct GuildRankNameEntry {
     pub rank_index: u32,
     pub rank_name: String,
 }
 
 /// Current accumulated guild rank-name table, sorted by rank index.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct GuildRankNamesState {
     pub guild_id: u32,
     pub ranks: Vec<GuildRankNameEntry>,
@@ -589,7 +591,7 @@ pub struct GuildRankNamesState {
 
 /// Current dynamic-zone or expedition state assembled from the independent
 /// info and switch packets.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct DynamicZoneState {
     pub active: bool,
     pub zone_id: Option<u16>,
@@ -605,7 +607,7 @@ pub struct DynamicZoneState {
 }
 
 /// A single door / static object row from OP_SpawnDoor.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct DoorInfo {
     pub id: u32,
     pub name: String,
@@ -623,7 +625,7 @@ pub struct DoorInfo {
 }
 
 /// A ground object or dropped item in its native identity namespace.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct GroundItemInfo {
     pub id: u32,
     /// Actor-definition model name. Resolving it to an item display name needs
@@ -635,7 +637,7 @@ pub struct GroundItemInfo {
 }
 
 /// One destination trigger from `OP_SendZonePoints`.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct ZonePointInfo {
     /// Wire trigger id. Modern Test records identify the portal by actor name
     /// instead and therefore leave this absent.
@@ -653,7 +655,7 @@ pub struct ZonePointInfo {
 }
 
 /// A decoded, backend-neutral world event.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub enum Event {
     /// Stateful correlators were reset before the next event in this batch was
     /// observed. Hosts must apply this before later events in the batch.
@@ -1200,7 +1202,7 @@ pub enum Event {
 }
 
 /// Outcome of decoding one app packet.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub enum Decoded {
     /// One neutral event.
     One(Event),
