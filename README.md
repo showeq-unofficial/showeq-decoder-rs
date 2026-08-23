@@ -85,6 +85,9 @@ See [`docs/application-packet-traces.md`](docs/application-packet-traces.md)
 for the capture-derived trace format and replay commands. The repository does
 not contain packet captures.
 
+See [`docs/event-coverage.md`](docs/event-coverage.md) for the exhaustive Event
+manifest, host coverage declarations, and the phase 11 deletion inventory.
+
 ## License
 
 GPL-2.0 — see [`LICENSE`](LICENSE). Matches legacy ShowEQ and `scry-cpp`.

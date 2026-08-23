@@ -20,6 +20,9 @@ if ! command -v cargo >/dev/null 2>&1; then
     exit 0
 fi
 
+echo "pre-push: Event manifest, bridge mapping, and phase 11 source inventory..."
+python3 tools/event_coverage.py check
+
 # Testing all three backends is the point. `cargo test --workspace` builds every
 # crate with its DEFAULT features, so seq-decode is only ever compiled against
 # seq-structs-live — a struct-mirror or shared-FFI change can pass --workspace

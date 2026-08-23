@@ -81,6 +81,14 @@ jobs:
       - uses: actions/checkout@v5
       - run: cargo fmt --all -- --check
 
+  event-contract:
+    name: event and legacy-source coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: check generated manifest, bridge mapping, and source inventory
+        run: python3 tools/event_coverage.py check
+
   eql-isolation:
     name: eql links no Live decoder
     runs-on: ubuntu-latest

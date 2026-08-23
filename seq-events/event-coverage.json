@@ -1,0 +1,595 @@
+{
+  "schema_version": 1,
+  "contract": "seq_events::Event",
+  "source": "seq-events/src/lib.rs",
+  "events": [
+    {
+      "name": "SessionReset",
+      "family": "lifecycle",
+      "internal_only": false,
+      "internal_only_reason": null
+    },
+    {
+      "name": "PlayerIdentityUpdated",
+      "family": "player",
+      "internal_only": false,
+      "internal_only_reason": null
+    },
+    {
+      "name": "PlayerMoved",
+      "family": "player",
+      "internal_only": false,
+      "internal_only_reason": null
+    },
+    {
+      "name": "PlayerVitalsUpdated",
+      "family": "player",
+      "internal_only": false,
+      "internal_only_reason": null
+    },
+    {
+      "name": "SpawnHealthUpdated",
+      "family": "entities_spatial",
+      "internal_only": false,
+      "internal_only_reason": null
+    },
+    {
+      "name": "PlayerDied",
+      "family": "player",
+      "internal_only": false,
+      "internal_only_reason": null
+    },
+    {
+      "name": "SpawnDied",
+      "family": "entities_spatial",
+      "internal_only": false,
+      "internal_only_reason": null
+    },
+    {
+      "name": "SpawnIdentityUpdated",
+      "family": "entities_spatial",
+      "internal_only": false,
+      "internal_only_reason": null
+    },
+    {
+      "name": "PlayerAppearanceUpdated",
+      "family": "player",
+      "internal_only": false,
+      "internal_only_reason": null
+    },
+    {
+      "name": "SpawnAdded",
+      "family": "entities_spatial",
+      "internal_only": false,
+      "internal_only_reason": null
+    },
+    {
+      "name": "SpawnMoved",
+      "family": "entities_spatial",
+      "internal_only": false,
+      "internal_only_reason": null
+    },
+    {
+      "name": "SpawnRemoved",
+      "family": "entities_spatial",
+      "internal_only": false,
+      "internal_only_reason": null
+    },
+    {
+      "name": "SpawnRenamed",
+      "family": "entities_spatial",
+      "internal_only": false,
+      "internal_only_reason": null
+    },
+    {
+      "name": "SpawnKilled",
+      "family": "entities_spatial",
+      "internal_only": true,
+      "internal_only_reason": "The ordered session converts it to PlayerDied or SpawnDied before host projection."
+    },
+    {
+      "name": "SpawnHp",
+      "family": "entities_spatial",
+      "internal_only": true,
+      "internal_only_reason": "The ordered session converts it to PlayerVitalsUpdated or SpawnHealthUpdated."
+    },
+    {
+      "name": "StatSync",
+      "family": "player",
+      "internal_only": true,
+      "internal_only_reason": "The ordered session resolves self ownership and emits PlayerVitalsUpdated or SpawnHealthUpdated."
+    },
+    {
+      "name": "SelfPos",
+      "family": "player",
+      "internal_only": true,
+      "internal_only_reason": "The ordered session resolves the local player and emits PlayerMoved."
+    },
+    {
+      "name": "SpawnAnimation",
+      "family": "entities_spatial",
+      "internal_only": false,
+      "internal_only_reason": null
+    },
+    {
+      "name": "SpawnIllusion",
+      "family": "entities_spatial",
+      "internal_only": false,
+      "internal_only_reason": null
+    },
+    {
+      "name": "GuildsInZone",
+      "family": "communication_social",
+      "internal_only": false,
+      "internal_only_reason": null
+    },
+    {
+      "name": "TimeOfDay",
+      "family": "lifecycle",
+      "internal_only": false,
+      "internal_only_reason": null
+    },
+    {
+      "name": "ZoneTransition",
+      "family": "lifecycle",
+      "internal_only": false,
+      "internal_only_reason": null
+    },
+    {
+      "name": "ZoneChanged",
+      "family": "lifecycle",
+      "internal_only": false,
+      "internal_only_reason": null
+    },
+    {
+      "name": "ZoneEnvironmentChanged",
+      "family": "lifecycle",
+      "internal_only": false,
+      "internal_only_reason": null
+    },
+    {
+      "name": "PlayerProfile",
+      "family": "player",
+      "internal_only": false,
+      "internal_only_reason": null
+    },
+    {
+      "name": "Stance",
+      "family": "player",
+      "internal_only": false,
+      "internal_only_reason": null
+    },
+    {
+      "name": "Invocation",
+      "family": "player",
+      "internal_only": false,
+      "internal_only_reason": null
+    },
+    {
+      "name": "InspectAnswer",
+      "family": "player",
+      "internal_only": false,
+      "internal_only_reason": null
+    },
+    {
+      "name": "GuildRoster",
+      "family": "communication_social",
+      "internal_only": false,
+      "internal_only_reason": null
+    },
+    {
+      "name": "GuildRosterWire",
+      "family": "communication_social",
+      "internal_only": true,
+      "internal_only_reason": "The ordered session applies completeness rules and emits GuildRosterUpdated."
+    },
+    {
+      "name": "GuildRosterUpdated",
+      "family": "communication_social",
+      "internal_only": false,
+      "internal_only_reason": null
+    },
+    {
+      "name": "GuildMemberStatus",
+      "family": "communication_social",
+      "internal_only": true,
+      "internal_only_reason": "The ordered session folds the member delta into GuildRosterUpdated."
+    },
+    {
+      "name": "ZoneServerInfo",
+      "family": "lifecycle",
+      "internal_only": false,
+      "internal_only_reason": null
+    },
+    {
+      "name": "ItemSet",
+      "family": "items_progression",
+      "internal_only": false,
+      "internal_only_reason": null
+    },
+    {
+      "name": "ItemLearned",
+      "family": "items_progression",
+      "internal_only": false,
+      "internal_only_reason": null
+    },
+    {
+      "name": "InventorySnapshot",
+      "family": "items_progression",
+      "internal_only": false,
+      "internal_only_reason": null
+    },
+    {
+      "name": "InventoryItemUpdated",
+      "family": "items_progression",
+      "internal_only": false,
+      "internal_only_reason": null
+    },
+    {
+      "name": "EquipmentSnapshot",
+      "family": "items_progression",
+      "internal_only": false,
+      "internal_only_reason": null
+    },
+    {
+      "name": "EquipmentSlotUpdated",
+      "family": "items_progression",
+      "internal_only": false,
+      "internal_only_reason": null
+    },
+    {
+      "name": "GuildMotd",
+      "family": "communication_social",
+      "internal_only": true,
+      "internal_only_reason": "The ordered session resolves the guild id and emits GuildMotdUpdated."
+    },
+    {
+      "name": "GuildMotdUpdated",
+      "family": "communication_social",
+      "internal_only": false,
+      "internal_only_reason": null
+    },
+    {
+      "name": "GuildRankName",
+      "family": "communication_social",
+      "internal_only": true,
+      "internal_only_reason": "The ordered session accumulates the rank table and emits GuildRankNamesUpdated."
+    },
+    {
+      "name": "GuildRankNamesUpdated",
+      "family": "communication_social",
+      "internal_only": false,
+      "internal_only_reason": null
+    },
+    {
+      "name": "LoadoutSwap",
+      "family": "player",
+      "internal_only": true,
+      "internal_only_reason": "The ordered session resolves self ownership and emits PlayerIdentityUpdated or SpawnIdentityUpdated."
+    },
+    {
+      "name": "Doors",
+      "family": "entities_spatial",
+      "internal_only": false,
+      "internal_only_reason": null
+    },
+    {
+      "name": "GroundItemRemoved",
+      "family": "entities_spatial",
+      "internal_only": false,
+      "internal_only_reason": null
+    },
+    {
+      "name": "GroundItem",
+      "family": "entities_spatial",
+      "internal_only": false,
+      "internal_only_reason": null
+    },
+    {
+      "name": "CorpseLocated",
+      "family": "entities_spatial",
+      "internal_only": false,
+      "internal_only_reason": null
+    },
+    {
+      "name": "ZonePoints",
+      "family": "entities_spatial",
+      "internal_only": false,
+      "internal_only_reason": null
+    },
+    {
+      "name": "Combat",
+      "family": "combat_spells",
+      "internal_only": true,
+      "internal_only_reason": "The ordered session normalizes wire sentinels and emits CombatDamage."
+    },
+    {
+      "name": "CombatDamage",
+      "family": "combat_spells",
+      "internal_only": false,
+      "internal_only_reason": null
+    },
+    {
+      "name": "SpellAction",
+      "family": "combat_spells",
+      "internal_only": true,
+      "internal_only_reason": "The ordered session correlates casting state and emits SpellActionResolved."
+    },
+    {
+      "name": "SpellActionResolved",
+      "family": "combat_spells",
+      "internal_only": false,
+      "internal_only_reason": null
+    },
+    {
+      "name": "SpellCastRequest",
+      "family": "combat_spells",
+      "internal_only": true,
+      "internal_only_reason": "The ordered session correlates the request with SpawnCast and emits SpellCastStarted."
+    },
+    {
+      "name": "SpawnCast",
+      "family": "combat_spells",
+      "internal_only": true,
+      "internal_only_reason": "The ordered session correlates the cast with SpellCastRequest and emits SpellCastStarted."
+    },
+    {
+      "name": "SpellCastStarted",
+      "family": "combat_spells",
+      "internal_only": false,
+      "internal_only_reason": null
+    },
+    {
+      "name": "SpellCastInterrupted",
+      "family": "combat_spells",
+      "internal_only": false,
+      "internal_only_reason": null
+    },
+    {
+      "name": "Targeted",
+      "family": "entities_spatial",
+      "internal_only": false,
+      "internal_only_reason": null
+    },
+    {
+      "name": "Considered",
+      "family": "entities_spatial",
+      "internal_only": false,
+      "internal_only_reason": null
+    },
+    {
+      "name": "AaTable",
+      "family": "items_progression",
+      "internal_only": true,
+      "internal_only_reason": "The ordered session deduplicates definitions and emits AlternateAbilityDefined."
+    },
+    {
+      "name": "AlternateAbilityDefined",
+      "family": "items_progression",
+      "internal_only": false,
+      "internal_only_reason": null
+    },
+    {
+      "name": "Exp",
+      "family": "items_progression",
+      "internal_only": true,
+      "internal_only_reason": "The ordered session merges level state and emits ExperienceUpdated."
+    },
+    {
+      "name": "ExperienceUpdated",
+      "family": "items_progression",
+      "internal_only": false,
+      "internal_only_reason": null
+    },
+    {
+      "name": "AaExp",
+      "family": "items_progression",
+      "internal_only": true,
+      "internal_only_reason": "The ordered session emits AlternateAdvancementUpdated."
+    },
+    {
+      "name": "AlternateAdvancementUpdated",
+      "family": "items_progression",
+      "internal_only": false,
+      "internal_only_reason": null
+    },
+    {
+      "name": "AlternateAdvancementSnapshot",
+      "family": "items_progression",
+      "internal_only": false,
+      "internal_only_reason": null
+    },
+    {
+      "name": "Stamina",
+      "family": "player",
+      "internal_only": false,
+      "internal_only_reason": null
+    },
+    {
+      "name": "ManaUpdate",
+      "family": "player",
+      "internal_only": true,
+      "internal_only_reason": "The ordered session emits PlayerVitalsUpdated."
+    },
+    {
+      "name": "SkillUpdate",
+      "family": "items_progression",
+      "internal_only": true,
+      "internal_only_reason": "The ordered session suppresses duplicate values and emits SkillValueUpdated."
+    },
+    {
+      "name": "SkillsSnapshot",
+      "family": "items_progression",
+      "internal_only": false,
+      "internal_only_reason": null
+    },
+    {
+      "name": "SkillValueUpdated",
+      "family": "items_progression",
+      "internal_only": false,
+      "internal_only_reason": null
+    },
+    {
+      "name": "LootTransaction",
+      "family": "loot",
+      "internal_only": true,
+      "internal_only_reason": "The ordered session correlates confirmations and narration into LootAcquired."
+    },
+    {
+      "name": "LootDrops",
+      "family": "loot",
+      "internal_only": true,
+      "internal_only_reason": "The ordered session deduplicates corpse windows and emits CorpseLootSnapshot."
+    },
+    {
+      "name": "CorpseLootSnapshot",
+      "family": "loot",
+      "internal_only": false,
+      "internal_only_reason": null
+    },
+    {
+      "name": "LootAcquired",
+      "family": "loot",
+      "internal_only": false,
+      "internal_only_reason": null
+    },
+    {
+      "name": "Money",
+      "family": "items_progression",
+      "internal_only": true,
+      "internal_only_reason": "The ordered session normalizes denominations and emits MoneyBalanceUpdated."
+    },
+    {
+      "name": "MoneyBalanceUpdated",
+      "family": "items_progression",
+      "internal_only": false,
+      "internal_only_reason": null
+    },
+    {
+      "name": "SimpleMessage",
+      "family": "communication_social",
+      "internal_only": true,
+      "internal_only_reason": "The ordered session emits ChatMessage with localized-message metadata."
+    },
+    {
+      "name": "FormattedMessage",
+      "family": "communication_social",
+      "internal_only": true,
+      "internal_only_reason": "The ordered session emits ChatMessage with localized arguments."
+    },
+    {
+      "name": "SpecialMessage",
+      "family": "communication_social",
+      "internal_only": true,
+      "internal_only_reason": "The ordered session emits ChatMessage after resolving target context."
+    },
+    {
+      "name": "LootMessage",
+      "family": "communication_social",
+      "internal_only": true,
+      "internal_only_reason": "The ordered session emits ChatMessage and feeds LootAcquired correlation."
+    },
+    {
+      "name": "Chat",
+      "family": "communication_social",
+      "internal_only": true,
+      "internal_only_reason": "The ordered session emits ChatMessage only for authoritative server traffic."
+    },
+    {
+      "name": "ChatMessage",
+      "family": "communication_social",
+      "internal_only": false,
+      "internal_only_reason": null
+    },
+    {
+      "name": "UcsRecord",
+      "family": "communication_social",
+      "internal_only": true,
+      "internal_only_reason": "The ordered session repairs the channel name and emits ChatMessage."
+    },
+    {
+      "name": "BuffList",
+      "family": "combat_spells",
+      "internal_only": true,
+      "internal_only_reason": "The ordered session diffs the snapshot into BuffAdded, BuffUpdated, and BuffRemoved."
+    },
+    {
+      "name": "BuffWire",
+      "family": "combat_spells",
+      "internal_only": true,
+      "internal_only_reason": "The ordered session resolves owner and caster state into semantic buff events."
+    },
+    {
+      "name": "BuffAdded",
+      "family": "combat_spells",
+      "internal_only": false,
+      "internal_only_reason": null
+    },
+    {
+      "name": "BuffUpdated",
+      "family": "combat_spells",
+      "internal_only": false,
+      "internal_only_reason": null
+    },
+    {
+      "name": "BuffRemoved",
+      "family": "combat_spells",
+      "internal_only": false,
+      "internal_only_reason": null
+    },
+    {
+      "name": "GroupFollow",
+      "family": "communication_social",
+      "internal_only": true,
+      "internal_only_reason": "The ordered session applies the membership delta and emits GroupRosterUpdated."
+    },
+    {
+      "name": "GroupDisband",
+      "family": "communication_social",
+      "internal_only": true,
+      "internal_only_reason": "The ordered session applies the departure or reset and emits GroupRosterUpdated."
+    },
+    {
+      "name": "GroupRosterWire",
+      "family": "communication_social",
+      "internal_only": true,
+      "internal_only_reason": "The ordered session assigns stable slots and emits GroupRosterUpdated."
+    },
+    {
+      "name": "GroupRosterUpdated",
+      "family": "communication_social",
+      "internal_only": false,
+      "internal_only_reason": null
+    },
+    {
+      "name": "DynamicZoneInfo",
+      "family": "communication_social",
+      "internal_only": true,
+      "internal_only_reason": "The ordered session combines both dynamic-zone halves into DynamicZoneUpdated."
+    },
+    {
+      "name": "DynamicZoneSwitch",
+      "family": "communication_social",
+      "internal_only": true,
+      "internal_only_reason": "The ordered session combines both dynamic-zone halves into DynamicZoneUpdated."
+    },
+    {
+      "name": "DynamicZoneUpdated",
+      "family": "communication_social",
+      "internal_only": false,
+      "internal_only_reason": null
+    },
+    {
+      "name": "LevelUpdate",
+      "family": "items_progression",
+      "internal_only": true,
+      "internal_only_reason": "The ordered session merges level and experience state into final player and progression events."
+    },
+    {
+      "name": "EnterWorld",
+      "family": "lifecycle",
+      "internal_only": false,
+      "internal_only_reason": null
+    }
+  ]
+}

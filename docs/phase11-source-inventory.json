@@ -1,0 +1,948 @@
+{
+  "schema_version": 1,
+  "purpose": "Phase 11 deletion inventory. Presence does not authorize deletion before host parity.",
+  "legacy_bridge_decoder_entrypoints": [
+    {
+      "name": "decode_aa_table_entry",
+      "declaration": "seq-bridge/src/lib.rs",
+      "line": 1923
+    },
+    {
+      "name": "decode_action",
+      "declaration": "seq-bridge/src/lib.rs",
+      "line": 1924
+    },
+    {
+      "name": "decode_action2",
+      "declaration": "seq-bridge/src/lib.rs",
+      "line": 1914
+    },
+    {
+      "name": "decode_action_alt",
+      "declaration": "seq-bridge/src/lib.rs",
+      "line": 1925
+    },
+    {
+      "name": "decode_activate_ability",
+      "declaration": "seq-bridge/src/lib.rs",
+      "line": 1922
+    },
+    {
+      "name": "decode_begin_cast",
+      "declaration": "seq-bridge/src/lib.rs",
+      "line": 1921
+    },
+    {
+      "name": "decode_buff",
+      "declaration": "seq-bridge/src/lib.rs",
+      "line": 1913
+    },
+    {
+      "name": "decode_buff_list",
+      "declaration": "seq-bridge/src/lib.rs",
+      "line": 1889
+    },
+    {
+      "name": "decode_channel_message",
+      "declaration": "seq-bridge/src/lib.rs",
+      "line": 1940
+    },
+    {
+      "name": "decode_click_object",
+      "declaration": "seq-bridge/src/lib.rs",
+      "line": 1911
+    },
+    {
+      "name": "decode_client_target",
+      "declaration": "seq-bridge/src/lib.rs",
+      "line": 1909
+    },
+    {
+      "name": "decode_consider",
+      "declaration": "seq-bridge/src/lib.rs",
+      "line": 1907
+    },
+    {
+      "name": "decode_corpse_loc",
+      "declaration": "seq-bridge/src/lib.rs",
+      "line": 1930
+    },
+    {
+      "name": "decode_death",
+      "declaration": "seq-bridge/src/lib.rs",
+      "line": 1910
+    },
+    {
+      "name": "decode_delete_spawn",
+      "declaration": "seq-bridge/src/lib.rs",
+      "line": 1818
+    },
+    {
+      "name": "decode_door",
+      "declaration": "seq-bridge/src/lib.rs",
+      "line": 1932
+    },
+    {
+      "name": "decode_dz_info",
+      "declaration": "seq-bridge/src/lib.rs",
+      "line": 1918
+    },
+    {
+      "name": "decode_dz_switch_info",
+      "declaration": "seq-bridge/src/lib.rs",
+      "line": 1919
+    },
+    {
+      "name": "decode_end_update",
+      "declaration": "seq-bridge/src/lib.rs",
+      "line": 1906
+    },
+    {
+      "name": "decode_exp_update",
+      "declaration": "seq-bridge/src/lib.rs",
+      "line": 1901
+    },
+    {
+      "name": "decode_formatted_message",
+      "declaration": "seq-bridge/src/lib.rs",
+      "line": 1937
+    },
+    {
+      "name": "decode_ground_spawn",
+      "declaration": "seq-bridge/src/lib.rs",
+      "line": 1933
+    },
+    {
+      "name": "decode_group_disband",
+      "declaration": "seq-bridge/src/lib.rs",
+      "line": 1926
+    },
+    {
+      "name": "decode_group_follow",
+      "declaration": "seq-bridge/src/lib.rs",
+      "line": 1927
+    },
+    {
+      "name": "decode_group_member_list",
+      "declaration": "seq-bridge/src/lib.rs",
+      "line": 1928
+    },
+    {
+      "name": "decode_group_roster",
+      "declaration": "seq-bridge/src/lib.rs",
+      "line": 1929
+    },
+    {
+      "name": "decode_guild_expanded_info",
+      "declaration": "seq-bridge/src/lib.rs",
+      "line": 1893
+    },
+    {
+      "name": "decode_guild_member_update",
+      "declaration": "seq-bridge/src/lib.rs",
+      "line": 1894
+    },
+    {
+      "name": "decode_guild_motd",
+      "declaration": "seq-bridge/src/lib.rs",
+      "line": 1892
+    },
+    {
+      "name": "decode_guild_roster",
+      "declaration": "seq-bridge/src/lib.rs",
+      "line": 1895
+    },
+    {
+      "name": "decode_guilds_in_zone_list",
+      "declaration": "seq-bridge/src/lib.rs",
+      "line": 1890
+    },
+    {
+      "name": "decode_hp_update",
+      "declaration": "seq-bridge/src/lib.rs",
+      "line": 1821
+    },
+    {
+      "name": "decode_illusion",
+      "declaration": "seq-bridge/src/lib.rs",
+      "line": 1912
+    },
+    {
+      "name": "decode_level_update",
+      "declaration": "seq-bridge/src/lib.rs",
+      "line": 1902
+    },
+    {
+      "name": "decode_loadout_swap",
+      "declaration": "seq-bridge/src/lib.rs",
+      "line": 1885
+    },
+    {
+      "name": "decode_loot_drops",
+      "declaration": "seq-bridge/src/lib.rs",
+      "line": 1888
+    },
+    {
+      "name": "decode_loot_message",
+      "declaration": "seq-bridge/src/lib.rs",
+      "line": 1939
+    },
+    {
+      "name": "decode_loot_transaction",
+      "declaration": "seq-bridge/src/lib.rs",
+      "line": 1887
+    },
+    {
+      "name": "decode_mana_change",
+      "declaration": "seq-bridge/src/lib.rs",
+      "line": 1904
+    },
+    {
+      "name": "decode_mob_health",
+      "declaration": "seq-bridge/src/lib.rs",
+      "line": 1899
+    },
+    {
+      "name": "decode_mob_update",
+      "declaration": "seq-bridge/src/lib.rs",
+      "line": 1817
+    },
+    {
+      "name": "decode_money_update",
+      "declaration": "seq-bridge/src/lib.rs",
+      "line": 1886
+    },
+    {
+      "name": "decode_new_guild_in_zone",
+      "declaration": "seq-bridge/src/lib.rs",
+      "line": 1891
+    },
+    {
+      "name": "decode_new_zone",
+      "declaration": "seq-bridge/src/lib.rs",
+      "line": 1941
+    },
+    {
+      "name": "decode_npc_move_update",
+      "declaration": "seq-bridge/src/lib.rs",
+      "line": 1946
+    },
+    {
+      "name": "decode_player_profile",
+      "declaration": "seq-bridge/src/lib.rs",
+      "line": 1942
+    },
+    {
+      "name": "decode_player_self_pos",
+      "declaration": "seq-bridge/src/lib.rs",
+      "line": 1944
+    },
+    {
+      "name": "decode_player_spawn_pos",
+      "declaration": "seq-bridge/src/lib.rs",
+      "line": 1945
+    },
+    {
+      "name": "decode_remove_spawn",
+      "declaration": "seq-bridge/src/lib.rs",
+      "line": 1820
+    },
+    {
+      "name": "decode_self_pos_breadcrumb",
+      "declaration": "seq-bridge/src/lib.rs",
+      "line": 1896
+    },
+    {
+      "name": "decode_simple_message",
+      "declaration": "seq-bridge/src/lib.rs",
+      "line": 1936
+    },
+    {
+      "name": "decode_skill_update",
+      "declaration": "seq-bridge/src/lib.rs",
+      "line": 1903
+    },
+    {
+      "name": "decode_spawn",
+      "declaration": "seq-bridge/src/lib.rs",
+      "line": 1819
+    },
+    {
+      "name": "decode_spawn_appearance",
+      "declaration": "seq-bridge/src/lib.rs",
+      "line": 1900
+    },
+    {
+      "name": "decode_spawn_rename",
+      "declaration": "seq-bridge/src/lib.rs",
+      "line": 1908
+    },
+    {
+      "name": "decode_special_message",
+      "declaration": "seq-bridge/src/lib.rs",
+      "line": 1938
+    },
+    {
+      "name": "decode_stamina",
+      "declaration": "seq-bridge/src/lib.rs",
+      "line": 1905
+    },
+    {
+      "name": "decode_start_cast",
+      "declaration": "seq-bridge/src/lib.rs",
+      "line": 1920
+    },
+    {
+      "name": "decode_stat_sync",
+      "declaration": "seq-bridge/src/lib.rs",
+      "line": 1822
+    },
+    {
+      "name": "decode_ucs_channels",
+      "declaration": "seq-bridge/src/lib.rs",
+      "line": 1898
+    },
+    {
+      "name": "decode_ucs_chat",
+      "declaration": "seq-bridge/src/lib.rs",
+      "line": 1897
+    },
+    {
+      "name": "decode_wear_change",
+      "declaration": "seq-bridge/src/lib.rs",
+      "line": 1916
+    },
+    {
+      "name": "decode_zone_change",
+      "declaration": "seq-bridge/src/lib.rs",
+      "line": 1917
+    },
+    {
+      "name": "decode_zone_point",
+      "declaration": "seq-bridge/src/lib.rs",
+      "line": 1934
+    }
+  ],
+  "standalone_bridge_trackers": [
+    {
+      "name": "EqlSelfTracker",
+      "bridge_declaration": "seq-bridge/src/lib.rs",
+      "line": 1830,
+      "implementation": "seq-backend-eql/src/self_track.rs",
+      "methods": [
+        "eql_self_tracker_new",
+        "reset",
+        "self_id",
+        "observe_spawn",
+        "observe_stat_sync",
+        "take_pending_vitals",
+        "observe_self_pos",
+        "provisional_id",
+        "take_retired_provisional"
+      ]
+    },
+    {
+      "name": "EqlLootTracker",
+      "bridge_declaration": "seq-bridge/src/lib.rs",
+      "line": 1855,
+      "implementation": "seq-backend-eql/src/loot_track.rs",
+      "methods": [
+        "eql_loot_tracker_new",
+        "reset",
+        "set_looter",
+        "set_zone",
+        "on_loot_message",
+        "on_loot_transaction",
+        "on_loot_drop_item",
+        "flush"
+      ]
+    }
+  ],
+  "backend_decoder_and_support_modules": [
+    {
+      "backend": "eql",
+      "module": "action",
+      "source": "seq-backend-eql/src/action.rs"
+    },
+    {
+      "backend": "eql",
+      "module": "action2",
+      "source": "seq-backend-eql/src/action2.rs"
+    },
+    {
+      "backend": "eql",
+      "module": "action_alt",
+      "source": "seq-backend-eql/src/action_alt.rs"
+    },
+    {
+      "backend": "eql",
+      "module": "backend",
+      "source": "seq-backend-eql/src/backend.rs"
+    },
+    {
+      "backend": "eql",
+      "module": "buff",
+      "source": "seq-backend-eql/src/buff.rs"
+    },
+    {
+      "backend": "eql",
+      "module": "channel_message",
+      "source": "seq-backend-eql/src/channel_message.rs"
+    },
+    {
+      "backend": "eql",
+      "module": "click_object",
+      "source": "seq-backend-eql/src/click_object.rs"
+    },
+    {
+      "backend": "eql",
+      "module": "client_target",
+      "source": "seq-backend-eql/src/client_target.rs"
+    },
+    {
+      "backend": "eql",
+      "module": "consider",
+      "source": "seq-backend-eql/src/consider.rs"
+    },
+    {
+      "backend": "eql",
+      "module": "corpse_loc",
+      "source": "seq-backend-eql/src/corpse_loc.rs"
+    },
+    {
+      "backend": "eql",
+      "module": "cursor",
+      "source": "seq-backend-eql/src/cursor.rs"
+    },
+    {
+      "backend": "eql",
+      "module": "death",
+      "source": "seq-backend-eql/src/death.rs"
+    },
+    {
+      "backend": "eql",
+      "module": "delete_spawn",
+      "source": "seq-backend-eql/src/delete_spawn.rs"
+    },
+    {
+      "backend": "eql",
+      "module": "dz_info",
+      "source": "seq-backend-eql/src/dz_info.rs"
+    },
+    {
+      "backend": "eql",
+      "module": "dz_switch_info",
+      "source": "seq-backend-eql/src/dz_switch_info.rs"
+    },
+    {
+      "backend": "eql",
+      "module": "end_update",
+      "source": "seq-backend-eql/src/end_update.rs"
+    },
+    {
+      "backend": "eql",
+      "module": "exp_update",
+      "source": "seq-backend-eql/src/exp_update.rs"
+    },
+    {
+      "backend": "eql",
+      "module": "formatted_message",
+      "source": "seq-backend-eql/src/formatted_message.rs"
+    },
+    {
+      "backend": "eql",
+      "module": "ground_spawn",
+      "source": "seq-backend-eql/src/ground_spawn.rs"
+    },
+    {
+      "backend": "eql",
+      "module": "group_disband",
+      "source": "seq-backend-eql/src/group_disband.rs"
+    },
+    {
+      "backend": "eql",
+      "module": "group_follow",
+      "source": "seq-backend-eql/src/group_follow.rs"
+    },
+    {
+      "backend": "eql",
+      "module": "group_member_list",
+      "source": "seq-backend-eql/src/group_member_list.rs"
+    },
+    {
+      "backend": "eql",
+      "module": "group_roster",
+      "source": "seq-backend-eql/src/group_roster.rs"
+    },
+    {
+      "backend": "eql",
+      "module": "guild_expanded_info",
+      "source": "seq-backend-eql/src/guild_expanded_info.rs"
+    },
+    {
+      "backend": "eql",
+      "module": "guild_in_zone",
+      "source": "seq-backend-eql/src/guild_in_zone.rs"
+    },
+    {
+      "backend": "eql",
+      "module": "guild_motd",
+      "source": "seq-backend-eql/src/guild_motd.rs"
+    },
+    {
+      "backend": "eql",
+      "module": "guild_roster",
+      "source": "seq-backend-eql/src/guild_roster.rs"
+    },
+    {
+      "backend": "eql",
+      "module": "hp_update",
+      "source": "seq-backend-eql/src/hp_update.rs"
+    },
+    {
+      "backend": "eql",
+      "module": "illusion",
+      "source": "seq-backend-eql/src/illusion.rs"
+    },
+    {
+      "backend": "eql",
+      "module": "item_packet",
+      "source": "seq-backend-eql/src/item_packet.rs"
+    },
+    {
+      "backend": "eql",
+      "module": "level_update",
+      "source": "seq-backend-eql/src/level_update.rs"
+    },
+    {
+      "backend": "eql",
+      "module": "links",
+      "source": "seq-backend-eql/src/links.rs"
+    },
+    {
+      "backend": "eql",
+      "module": "loadout_swap",
+      "source": "seq-backend-eql/src/loadout_swap.rs"
+    },
+    {
+      "backend": "eql",
+      "module": "loot_drops",
+      "source": "seq-backend-eql/src/loot_drops.rs"
+    },
+    {
+      "backend": "eql",
+      "module": "loot_message",
+      "source": "seq-backend-eql/src/loot_message.rs"
+    },
+    {
+      "backend": "eql",
+      "module": "loot_track",
+      "source": "seq-backend-eql/src/loot_track.rs"
+    },
+    {
+      "backend": "eql",
+      "module": "loot_transaction",
+      "source": "seq-backend-eql/src/loot_transaction.rs"
+    },
+    {
+      "backend": "eql",
+      "module": "mana_change",
+      "source": "seq-backend-eql/src/mana_change.rs"
+    },
+    {
+      "backend": "eql",
+      "module": "mob_health",
+      "source": "seq-backend-eql/src/mob_health.rs"
+    },
+    {
+      "backend": "eql",
+      "module": "mob_update",
+      "source": "seq-backend-eql/src/mob_update.rs"
+    },
+    {
+      "backend": "eql",
+      "module": "money_update",
+      "source": "seq-backend-eql/src/money_update.rs"
+    },
+    {
+      "backend": "eql",
+      "module": "new_zone",
+      "source": "seq-backend-eql/src/new_zone.rs"
+    },
+    {
+      "backend": "eql",
+      "module": "npc_move_update",
+      "source": "seq-backend-eql/src/npc_move_update.rs"
+    },
+    {
+      "backend": "eql",
+      "module": "player_profile",
+      "source": "seq-backend-eql/src/player_profile.rs"
+    },
+    {
+      "backend": "eql",
+      "module": "player_self_pos",
+      "source": "seq-backend-eql/src/player_self_pos.rs"
+    },
+    {
+      "backend": "eql",
+      "module": "player_spawn_pos",
+      "source": "seq-backend-eql/src/player_spawn_pos.rs"
+    },
+    {
+      "backend": "eql",
+      "module": "remove_spawn",
+      "source": "seq-backend-eql/src/remove_spawn.rs"
+    },
+    {
+      "backend": "eql",
+      "module": "self_pos_breadcrumb",
+      "source": "seq-backend-eql/src/self_pos_breadcrumb.rs"
+    },
+    {
+      "backend": "eql",
+      "module": "self_track",
+      "source": "seq-backend-eql/src/self_track.rs"
+    },
+    {
+      "backend": "eql",
+      "module": "simple_message",
+      "source": "seq-backend-eql/src/simple_message.rs"
+    },
+    {
+      "backend": "eql",
+      "module": "skill_update",
+      "source": "seq-backend-eql/src/skill_update.rs"
+    },
+    {
+      "backend": "eql",
+      "module": "spawn_appearance",
+      "source": "seq-backend-eql/src/spawn_appearance.rs"
+    },
+    {
+      "backend": "eql",
+      "module": "spawn_door",
+      "source": "seq-backend-eql/src/spawn_door.rs"
+    },
+    {
+      "backend": "eql",
+      "module": "spawn_rename",
+      "source": "seq-backend-eql/src/spawn_rename.rs"
+    },
+    {
+      "backend": "eql",
+      "module": "special_message",
+      "source": "seq-backend-eql/src/special_message.rs"
+    },
+    {
+      "backend": "eql",
+      "module": "stamina",
+      "source": "seq-backend-eql/src/stamina.rs"
+    },
+    {
+      "backend": "eql",
+      "module": "start_cast",
+      "source": "seq-backend-eql/src/start_cast.rs"
+    },
+    {
+      "backend": "eql",
+      "module": "ucs_chat",
+      "source": "seq-backend-eql/src/ucs_chat.rs"
+    },
+    {
+      "backend": "eql",
+      "module": "wear_change",
+      "source": "seq-backend-eql/src/wear_change.rs"
+    },
+    {
+      "backend": "eql",
+      "module": "zone_change",
+      "source": "seq-backend-eql/src/zone_change.rs"
+    },
+    {
+      "backend": "eql",
+      "module": "zone_point",
+      "source": "seq-backend-eql/src/zone_point.rs"
+    },
+    {
+      "backend": "eql",
+      "module": "zone_server_info",
+      "source": "seq-backend-eql/src/zone_server_info.rs"
+    },
+    {
+      "backend": "live_test",
+      "module": "action",
+      "source": "seq-decode/src/action.rs"
+    },
+    {
+      "backend": "live_test",
+      "module": "action2",
+      "source": "seq-decode/src/action2.rs"
+    },
+    {
+      "backend": "live_test",
+      "module": "action_alt",
+      "source": "seq-decode/src/action_alt.rs"
+    },
+    {
+      "backend": "live_test",
+      "module": "alt_exp_update",
+      "source": "seq-decode/src/alt_exp_update.rs"
+    },
+    {
+      "backend": "live_test",
+      "module": "begin_cast",
+      "source": "seq-decode/src/begin_cast.rs"
+    },
+    {
+      "backend": "live_test",
+      "module": "buff",
+      "source": "seq-decode/src/buff.rs"
+    },
+    {
+      "backend": "live_test",
+      "module": "channel_message",
+      "source": "seq-decode/src/channel_message.rs"
+    },
+    {
+      "backend": "live_test",
+      "module": "click_object",
+      "source": "seq-decode/src/click_object.rs"
+    },
+    {
+      "backend": "live_test",
+      "module": "client_target",
+      "source": "seq-decode/src/client_target.rs"
+    },
+    {
+      "backend": "live_test",
+      "module": "consider",
+      "source": "seq-decode/src/consider.rs"
+    },
+    {
+      "backend": "live_test",
+      "module": "corpse_loc",
+      "source": "seq-decode/src/corpse_loc.rs"
+    },
+    {
+      "backend": "live_test",
+      "module": "cursor",
+      "source": "seq-decode/src/cursor.rs"
+    },
+    {
+      "backend": "live_test",
+      "module": "death",
+      "source": "seq-decode/src/death.rs"
+    },
+    {
+      "backend": "live_test",
+      "module": "delete_spawn",
+      "source": "seq-decode/src/delete_spawn.rs"
+    },
+    {
+      "backend": "live_test",
+      "module": "dz_info",
+      "source": "seq-decode/src/dz_info.rs"
+    },
+    {
+      "backend": "live_test",
+      "module": "dz_switch_info",
+      "source": "seq-decode/src/dz_switch_info.rs"
+    },
+    {
+      "backend": "live_test",
+      "module": "end_update",
+      "source": "seq-decode/src/end_update.rs"
+    },
+    {
+      "backend": "live_test",
+      "module": "exp_update",
+      "source": "seq-decode/src/exp_update.rs"
+    },
+    {
+      "backend": "live_test",
+      "module": "formatted_message",
+      "source": "seq-decode/src/formatted_message.rs"
+    },
+    {
+      "backend": "live_test",
+      "module": "ground_spawn",
+      "source": "seq-decode/src/ground_spawn.rs"
+    },
+    {
+      "backend": "live_test",
+      "module": "group_disband",
+      "source": "seq-decode/src/group_disband.rs"
+    },
+    {
+      "backend": "live_test",
+      "module": "group_follow",
+      "source": "seq-decode/src/group_follow.rs"
+    },
+    {
+      "backend": "live_test",
+      "module": "group_member_list",
+      "source": "seq-decode/src/group_member_list.rs"
+    },
+    {
+      "backend": "live_test",
+      "module": "guild_expanded_info",
+      "source": "seq-decode/src/guild_expanded_info.rs"
+    },
+    {
+      "backend": "live_test",
+      "module": "guild_in_zone",
+      "source": "seq-decode/src/guild_in_zone.rs"
+    },
+    {
+      "backend": "live_test",
+      "module": "guild_member_update",
+      "source": "seq-decode/src/guild_member_update.rs"
+    },
+    {
+      "backend": "live_test",
+      "module": "guild_motd",
+      "source": "seq-decode/src/guild_motd.rs"
+    },
+    {
+      "backend": "live_test",
+      "module": "guild_roster",
+      "source": "seq-decode/src/guild_roster.rs"
+    },
+    {
+      "backend": "live_test",
+      "module": "hp_update",
+      "source": "seq-decode/src/hp_update.rs"
+    },
+    {
+      "backend": "live_test",
+      "module": "illusion",
+      "source": "seq-decode/src/illusion.rs"
+    },
+    {
+      "backend": "live_test",
+      "module": "item_packet",
+      "source": "seq-decode/src/item_packet.rs"
+    },
+    {
+      "backend": "live_test",
+      "module": "level_update",
+      "source": "seq-decode/src/level_update.rs"
+    },
+    {
+      "backend": "live_test",
+      "module": "mana_change",
+      "source": "seq-decode/src/mana_change.rs"
+    },
+    {
+      "backend": "live_test",
+      "module": "mob_health",
+      "source": "seq-decode/src/mob_health.rs"
+    },
+    {
+      "backend": "live_test",
+      "module": "mob_update",
+      "source": "seq-decode/src/mob_update.rs"
+    },
+    {
+      "backend": "live_test",
+      "module": "new_zone",
+      "source": "seq-decode/src/new_zone.rs"
+    },
+    {
+      "backend": "live_test",
+      "module": "npc_move_update",
+      "source": "seq-decode/src/npc_move_update.rs"
+    },
+    {
+      "backend": "live_test",
+      "module": "player_profile",
+      "source": "seq-decode/src/player_profile.rs"
+    },
+    {
+      "backend": "live_test",
+      "module": "player_self_pos",
+      "source": "seq-decode/src/player_self_pos.rs"
+    },
+    {
+      "backend": "live_test",
+      "module": "player_spawn_pos",
+      "source": "seq-decode/src/player_spawn_pos.rs"
+    },
+    {
+      "backend": "live_test",
+      "module": "remove_spawn",
+      "source": "seq-decode/src/remove_spawn.rs"
+    },
+    {
+      "backend": "live_test",
+      "module": "simple_message",
+      "source": "seq-decode/src/simple_message.rs"
+    },
+    {
+      "backend": "live_test",
+      "module": "skill_update",
+      "source": "seq-decode/src/skill_update.rs"
+    },
+    {
+      "backend": "live_test",
+      "module": "spawn",
+      "source": "seq-decode/src/spawn.rs"
+    },
+    {
+      "backend": "live_test",
+      "module": "spawn_appearance",
+      "source": "seq-decode/src/spawn_appearance.rs"
+    },
+    {
+      "backend": "live_test",
+      "module": "spawn_door",
+      "source": "seq-decode/src/spawn_door.rs"
+    },
+    {
+      "backend": "live_test",
+      "module": "spawn_rename",
+      "source": "seq-decode/src/spawn_rename.rs"
+    },
+    {
+      "backend": "live_test",
+      "module": "special_message",
+      "source": "seq-decode/src/special_message.rs"
+    },
+    {
+      "backend": "live_test",
+      "module": "stamina",
+      "source": "seq-decode/src/stamina.rs"
+    },
+    {
+      "backend": "live_test",
+      "module": "start_cast",
+      "source": "seq-decode/src/start_cast.rs"
+    },
+    {
+      "backend": "live_test",
+      "module": "time_of_day",
+      "source": "seq-decode/src/time_of_day.rs"
+    },
+    {
+      "backend": "live_test",
+      "module": "wear_change",
+      "source": "seq-decode/src/wear_change.rs"
+    },
+    {
+      "backend": "live_test",
+      "module": "zone_change",
+      "source": "seq-decode/src/zone_change.rs"
+    },
+    {
+      "backend": "live_test",
+      "module": "zone_point",
+      "source": "seq-decode/src/zone_point.rs"
+    },
+    {
+      "backend": "live_test",
+      "module": "zone_server_info",
+      "source": "seq-decode/src/zone_server_info.rs"
+    }
+  ]
+}

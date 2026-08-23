@@ -280,6 +280,34 @@ fn assert_text_group_and_dz(backend: BackendId, base: u16) {
                 && message.text == "caf\u{e9}"
     ));
 
+    let client_say = decode(
+        &mut session,
+        base,
+        CHAT,
+        Dir::ClientToServer,
+        &common_message(b"Hero", b"", b"outbound", 8),
+    );
+    assert!(matches!(client_say.as_slice(), [Event::Chat { text, .. }] if text == "outbound"));
+    assert!(
+        client_say
+            .iter()
+            .all(|event| !matches!(event, Event::ChatMessage(_))),
+        "client-side OP_CommonMessage must remain compatibility-only"
+    );
+
+    let server_say = decode(
+        &mut session,
+        base,
+        CHAT,
+        Dir::ServerToClient,
+        &common_message(b"Hero", b"", b"authoritative", 8),
+    );
+    assert!(matches!(
+        server_say.as_slice(),
+        [Event::Chat { text, .. }, Event::ChatMessage(message)]
+            if text == "authoritative" && message.text == "authoritative"
+    ));
+
     let mut simple = [0; 12];
     simple[..4].copy_from_slice(&123u32.to_le_bytes());
     simple[4..8].copy_from_slice(&259u32.to_le_bytes());

@@ -283,6 +283,9 @@ dependencies = [
  "seq-events",
  "seq-protocol-data",
  "seq-session",
+ "serde",
+ "serde_json",
+ "syn",
 ]
 
 [[package]]
@@ -299,6 +302,8 @@ name = "seq-events"
 version = "0.1.0"
 dependencies = [
  "serde",
+ "serde_json",
+ "syn",
 ]
 
 [[package]]

@@ -556,7 +556,7 @@ impl Session {
                 for mut event in self.apply_progression_semantics(event) {
                     self.apply_entity_semantics(&mut event);
                     for event in self.apply_combat_semantics(event, direction) {
-                        for event in self.apply_communication_semantics(event) {
+                        for event in self.apply_communication_semantics(event, direction) {
                             let semantic_loot = self.decoder.observe_event(
                                 &event,
                                 opcode_name,
@@ -1576,7 +1576,7 @@ impl Session {
     }
 
     #[allow(clippy::too_many_lines)]
-    fn apply_communication_semantics(&mut self, event: Event) -> Vec<Event> {
+    fn apply_communication_semantics(&mut self, event: Event, direction: Direction) -> Vec<Event> {
         match event {
             Event::Chat {
                 channel,
@@ -1594,20 +1594,24 @@ impl Session {
                     chat_color,
                     channel_name: channel_name.clone(),
                 };
-                vec![
-                    compatibility,
-                    Event::ChatMessage(ChatMessage {
-                        kind: ChatMessageKind::Common,
-                        channel,
-                        from,
-                        target,
-                        text: clean_links(&text),
-                        chat_color,
-                        channel_name,
-                        format_id: None,
-                        args: Vec::new(),
-                    }),
-                ]
+                if direction == Dir::ClientToServer {
+                    vec![compatibility]
+                } else {
+                    vec![
+                        compatibility,
+                        Event::ChatMessage(ChatMessage {
+                            kind: ChatMessageKind::Common,
+                            channel,
+                            from,
+                            target,
+                            text: clean_links(&text),
+                            chat_color,
+                            channel_name,
+                            format_id: None,
+                            args: Vec::new(),
+                        }),
+                    ]
+                }
             }
             Event::SimpleMessage { format_id, color } => vec![
                 Event::SimpleMessage { format_id, color },
