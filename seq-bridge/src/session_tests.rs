@@ -1,10 +1,11 @@
 use super::*;
 use seq_events::{
     AlternateAbilityDefinition, AlternateAbilityRank, AlternateAdvancementProgress,
-    AlternateAdvancementSnapshot, BuffEntry, DoorInfo, Event, ExperienceProgress, GroundItemInfo,
-    GuildInZone, GuildRosterMember, ItemLocation, ItemTemplate, LootItemInfo, MoneyBalance,
-    PlayerAppearance, PlayerIdentity, PlayerVitals, Point3, Pos, ProfileInfo, SessionResetReason,
-    SkillValue, SpawnInfo, Velocity, VitalValue, ZoneEnvironment, ZoneInfo, ZonePointInfo,
+    AlternateAdvancementSnapshot, BuffEntry, CorpseLootSnapshot, DoorInfo, Event,
+    ExperienceProgress, GroundItemInfo, GuildInZone, GuildRosterMember, ItemLocation, ItemTemplate,
+    LootAcquisition, LootItemInfo, MoneyBalance, PlayerAppearance, PlayerIdentity, PlayerVitals,
+    Point3, Pos, ProfileInfo, SessionResetReason, SkillValue, SpawnInfo, Velocity, VitalValue,
+    ZoneEnvironment, ZoneInfo, ZonePointInfo,
 };
 
 fn pos(seed: i32) -> Pos {
@@ -491,6 +492,55 @@ fn canonical_events() -> Vec<Event> {
             corpse_name: "corpse".into(),
             items: vec![loot_item()],
         },
+        Event::CorpseLootSnapshot(Box::new(CorpseLootSnapshot {
+            timestamp: 235,
+            corpse_id: 236,
+            corpse_name: "corpse snapshot".into(),
+            corpse_name_normalized: "corpse snapshot".into(),
+            zone_short: "zone_multi".into(),
+            zone_base: "zone".into(),
+            instance: "multi".into(),
+            looter: "player".into(),
+            items: vec![loot_item()],
+        })),
+        Event::LootAcquired(Box::new(LootAcquisition {
+            timestamp: 237,
+            item_name: "acquired item".into(),
+            item_id: Some(238),
+            quantity: 239,
+            corpse_name: "a corpse".into(),
+            corpse_name_normalized: "corpse".into(),
+            corpse_id: None,
+            zone_short: "zone_solo".into(),
+            zone_base: "zone".into(),
+            instance: "solo".into(),
+            sold: true,
+            coin_copper: 240,
+            disposition: "sold".into(),
+            looter: "player".into(),
+            sequence: Some(241),
+            from_corpse: false,
+            complete: false,
+        })),
+        Event::LootAcquired(Box::new(LootAcquisition {
+            timestamp: 242,
+            item_name: "Coin".into(),
+            item_id: None,
+            quantity: 1,
+            corpse_name: String::new(),
+            corpse_name_normalized: String::new(),
+            corpse_id: Some(243),
+            zone_short: String::new(),
+            zone_base: String::new(),
+            instance: String::new(),
+            sold: false,
+            coin_copper: 244,
+            disposition: "corpse_coin".into(),
+            looter: String::new(),
+            sequence: None,
+            from_corpse: true,
+            complete: true,
+        })),
         Event::Money {
             platinum: 235,
             gold: 236,
@@ -1199,6 +1249,50 @@ fn reconstruct(batch: &ffi::SessionDecodeBatch) -> Vec<Event> {
                             .collect(),
                     }
                 }
+                ffi::SessionEventKind::CorpseLootSnapshot => {
+                    let p = &batch.corpse_loot_snapshot[i];
+                    Event::CorpseLootSnapshot(Box::new(CorpseLootSnapshot {
+                        timestamp: p.timestamp,
+                        corpse_id: p.corpse_id,
+                        corpse_name: p.corpse_name.clone(),
+                        corpse_name_normalized: p.corpse_name_normalized.clone(),
+                        zone_short: p.zone_short.clone(),
+                        zone_base: p.zone_base.clone(),
+                        instance: p.instance.clone(),
+                        looter: p.looter.clone(),
+                        items: p
+                            .items
+                            .iter()
+                            .map(|item| LootItemInfo {
+                                name: item.name.clone(),
+                                icon: item.icon,
+                                item_id: item.item_id,
+                            })
+                            .collect(),
+                    }))
+                }
+                ffi::SessionEventKind::LootAcquired => {
+                    let p = &batch.loot_acquired[i];
+                    Event::LootAcquired(Box::new(LootAcquisition {
+                        timestamp: p.timestamp,
+                        item_name: p.item_name.clone(),
+                        item_id: p.has_item_id.then_some(p.item_id),
+                        quantity: p.quantity,
+                        corpse_name: p.corpse_name.clone(),
+                        corpse_name_normalized: p.corpse_name_normalized.clone(),
+                        corpse_id: p.has_corpse_id.then_some(p.corpse_id),
+                        zone_short: p.zone_short.clone(),
+                        zone_base: p.zone_base.clone(),
+                        instance: p.instance.clone(),
+                        sold: p.sold,
+                        coin_copper: p.coin_copper,
+                        disposition: p.disposition.clone(),
+                        looter: p.looter.clone(),
+                        sequence: p.has_sequence.then_some(p.sequence),
+                        from_corpse: p.from_corpse,
+                        complete: p.complete,
+                    }))
+                }
                 ffi::SessionEventKind::Money => {
                     let p = &batch.money[i];
                     Event::Money {
@@ -1456,6 +1550,7 @@ fn stateful_bridge_sessions_are_isolated_when_interleaved() {
         21,
     );
     assert!(second_confirmation.loot_rows.is_empty());
+    assert!(second_confirmation.loot_acquired.is_empty());
     let first_confirmation = first.decode(
         ffi::SessionStream::Zone,
         2,
@@ -1466,4 +1561,21 @@ fn stateful_bridge_sessions_are_isolated_when_interleaved() {
     assert_eq!(first_confirmation.loot_rows.len(), 1);
     assert_eq!(first_confirmation.loot_rows[0].item_name, "Sword");
     assert_eq!(first_confirmation.loot_rows[0].sequence, 302);
+    assert!(first_confirmation.loot_rows[0].complete);
+    assert_eq!(first_confirmation.loot_acquired.len(), 1);
+    let acquired = &first_confirmation.loot_acquired[0];
+    assert_eq!(acquired.timestamp, 20);
+    assert_eq!(acquired.item_name, "Sword");
+    assert!(acquired.has_item_id);
+    assert_eq!(acquired.item_id, 300);
+    assert!(acquired.has_corpse_id);
+    assert_eq!(acquired.corpse_id, 301);
+    assert!(acquired.has_sequence);
+    assert_eq!(acquired.sequence, 302);
+    assert!(acquired.complete);
+
+    let orphan = second.flush(ffi::SessionFlushReason::ReplayEnd);
+    assert_eq!(orphan.loot_acquired.len(), 1);
+    assert!(!orphan.loot_acquired[0].complete);
+    assert_eq!(orphan.loot_acquired[0].timestamp, 21);
 }

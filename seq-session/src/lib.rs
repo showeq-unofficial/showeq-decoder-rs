@@ -21,6 +21,8 @@ use seq_events::{
     AlternateAdvancementSnapshot, Backend, Decoded, ExperienceProgress, ItemTemplate, MoneyBalance,
     PlayerAppearance, PlayerIdentity, PlayerVitals, SessionResetReason, SkillValue, VitalValue,
 };
+#[cfg(feature = "backend-eql")]
+use seq_events::{CorpseLootSnapshot, LootAcquisition};
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap},
     sync::Arc,
@@ -87,15 +89,16 @@ impl BackendSession {
         direction: Direction,
         payload: &[u8],
         timestamp: i64,
-    ) {
+    ) -> Vec<Event> {
         match self {
             #[cfg(feature = "backend-eql")]
             Self::Eql(state) => {
-                state.observe_event(event, opcode_name, direction, payload, timestamp);
+                state.observe_event(event, opcode_name, direction, payload, timestamp)
             }
             #[cfg(any(feature = "backend-live", feature = "backend-test"))]
             Self::Live(_) | Self::Test(_) => {
                 let _ = (event, opcode_name, direction, payload, timestamp);
+                Vec::new()
             }
         }
     }
@@ -303,7 +306,7 @@ impl Session {
         opcode_id: OpcodeId,
         direction: Direction,
         payload: &[u8],
-        _timestamp: i64,
+        timestamp: i64,
     ) -> DecodeBatch {
         let catalog = self.protocol_registry.snapshot(self.backend);
         let generation = catalog.generation();
@@ -324,26 +327,27 @@ impl Session {
             BackendSession::Eql(state) => state.decoder.decode(opcode_name, direction, payload),
         };
         let decoded =
-            self.apply_session_semantics(decoded, opcode_name, direction, payload, _timestamp);
+            self.apply_session_semantics(decoded, opcode_name, direction, payload, timestamp);
         batch(generation, decoded)
     }
 
     /// Close stateful correlators at a lifecycle boundary.
     ///
-    /// EQL loot rows remain a separate shadow output until the loot-family
-    /// migration. Zone-transition and explicit resets emit a reset marker;
-    /// terminal flushes only close correlators.
+    /// The returned batch carries any incomplete loot acquisition before the
+    /// reset marker. Compatibility loot rows remain available through the
+    /// separate drain while hosts cut over.
     pub fn flush(&mut self, reason: FlushReason) -> Vec<Event> {
-        self.reset_correlations();
+        let mut events = self.reset_correlations();
         match reason {
-            FlushReason::ZoneTransition => vec![Event::SessionReset {
+            FlushReason::ZoneTransition => events.push(Event::SessionReset {
                 reason: SessionResetReason::ZoneTransition,
-            }],
-            FlushReason::Reset => vec![Event::SessionReset {
+            }),
+            FlushReason::Reset => events.push(Event::SessionReset {
                 reason: SessionResetReason::Explicit,
-            }],
-            FlushReason::Shutdown | FlushReason::ReplayEnd => Vec::new(),
+            }),
+            FlushReason::Shutdown | FlushReason::ReplayEnd => {}
         }
+        events
     }
 
     /// Current EQL self-correlation state. Non-EQL sessions return zeros.
@@ -407,16 +411,22 @@ impl Session {
                 _ => None,
             };
             if let Some(reason) = reset {
-                self.reset_correlations();
+                output.extend(self.reset_correlations());
                 output.push(Event::SessionReset { reason });
             }
 
             for event in self.apply_player_semantics(event, opcode_name, direction) {
                 for mut event in self.apply_progression_semantics(event) {
                     self.apply_entity_semantics(&mut event);
-                    self.decoder
-                        .observe_event(&event, opcode_name, direction, payload, timestamp);
+                    let semantic_loot = self.decoder.observe_event(
+                        &event,
+                        opcode_name,
+                        direction,
+                        payload,
+                        timestamp,
+                    );
                     output.push(event);
+                    output.extend(semantic_loot);
                 }
             }
         }
@@ -1025,7 +1035,7 @@ impl Session {
         output
     }
 
-    fn reset_correlations(&mut self) {
+    fn reset_correlations(&mut self) -> Vec<Event> {
         self.entities.clear();
         self.player_id = None;
         self.update_identity_id();
@@ -1033,13 +1043,15 @@ impl Session {
         match &mut self.decoder {
             #[cfg(feature = "backend-eql")]
             BackendSession::Eql(state) => {
-                state.loot_rows.extend(state.loot_tracker.flush());
+                let rows = state.loot_tracker.flush();
+                let events = state.finish_loot_rows(rows);
                 state.loot_tracker.reset();
                 state.self_tracker.reset();
                 state.self_stats.clear();
+                events
             }
             #[cfg(any(feature = "backend-live", feature = "backend-test"))]
-            BackendSession::Live(_) | BackendSession::Test(_) => {}
+            BackendSession::Live(_) | BackendSession::Test(_) => Vec::new(),
         }
     }
 }
@@ -1134,15 +1146,16 @@ impl EqlSession {
         direction: Direction,
         payload: &[u8],
         timestamp: i64,
-    ) {
+    ) -> Vec<Event> {
         match event {
             Event::PlayerProfile(profile) => {
                 self.player_name.clone_from(&profile.name);
                 self.loot_tracker.set_looter(&profile.name);
+                Vec::new()
             }
             Event::ZoneChanged(zone) => {
-                self.loot_rows
-                    .extend(self.loot_tracker.set_zone(&zone.short_name));
+                let rows = self.loot_tracker.set_zone(&zone.short_name);
+                self.finish_loot_rows(rows)
             }
             Event::LootMessage {
                 color,
@@ -1150,10 +1163,10 @@ impl EqlSession {
                 item_id,
                 item_name,
             } => {
-                self.loot_rows.extend(
-                    self.loot_tracker
-                        .on_loot_message(*color, text, *item_id, item_name, timestamp),
-                );
+                let rows = self
+                    .loot_tracker
+                    .on_loot_message(*color, text, *item_id, item_name, timestamp);
+                self.finish_loot_rows(rows)
             }
             Event::LootTransaction {
                 corpse_id,
@@ -1169,7 +1182,7 @@ impl EqlSession {
                 } else {
                     0
                 };
-                self.loot_rows.extend(self.loot_tracker.on_loot_transaction(
+                let rows = self.loot_tracker.on_loot_transaction(
                     *corpse_id,
                     *item_id,
                     *quantity,
@@ -1177,30 +1190,94 @@ impl EqlSession {
                     *from_corpse,
                     sequence,
                     timestamp,
-                ));
+                );
+                self.finish_loot_rows(rows)
             }
             Event::LootDrops {
                 corpse_id,
                 corpse_name,
                 items,
             } => {
+                let emit_snapshot =
+                    self.loot_tracker
+                        .observe_window_snapshot(*corpse_id, corpse_name, items);
+                let mut rows = Vec::new();
                 for item in items {
-                    self.loot_rows.extend(self.loot_tracker.on_loot_drop_item(
+                    let item_rows = self.loot_tracker.on_loot_drop_item(
                         *corpse_id,
                         corpse_name,
                         &item.name,
                         item.icon,
                         item.item_id,
                         timestamp,
-                    ));
+                    );
+                    if !item_rows.is_empty() {
+                        rows.extend(item_rows);
+                    }
+                }
+                self.loot_rows.extend(rows);
+                if !emit_snapshot {
+                    Vec::new()
+                } else {
+                    let (zone_base, instance) =
+                        seq_backend_eql::loot_track::split_zone_instance(self.loot_tracker.zone());
+                    vec![Event::CorpseLootSnapshot(Box::new(CorpseLootSnapshot {
+                        timestamp,
+                        corpse_id: *corpse_id,
+                        corpse_name: corpse_name.clone(),
+                        corpse_name_normalized: seq_backend_eql::loot_track::normalize_mob(
+                            corpse_name,
+                        ),
+                        zone_short: self.loot_tracker.zone().to_owned(),
+                        zone_base,
+                        instance,
+                        looter: self.player_name.clone(),
+                        items: items.clone(),
+                    }))]
                 }
             }
             Event::EnterWorld { character_name } if direction == Dir::ClientToServer => {
                 self.player_name.clone_from(character_name);
                 self.loot_tracker.set_looter(character_name);
+                Vec::new()
             }
-            _ => {}
+            _ => Vec::new(),
         }
+    }
+
+    fn finish_loot_rows(&mut self, rows: Vec<LootRow>) -> Vec<Event> {
+        let events = rows
+            .iter()
+            .filter(|row| row.source != seq_backend_eql::loot_track::LootSource::Window)
+            .cloned()
+            .map(loot_acquisition)
+            .map(|acquisition| Event::LootAcquired(Box::new(acquisition)))
+            .collect();
+        self.loot_rows.extend(rows);
+        events
+    }
+}
+
+#[cfg(feature = "backend-eql")]
+fn loot_acquisition(row: LootRow) -> LootAcquisition {
+    LootAcquisition {
+        timestamp: row.ts,
+        item_name: row.item_name,
+        item_id: nonzero(row.item_id),
+        quantity: row.qty,
+        corpse_name: row.mob_name,
+        corpse_name_normalized: row.mob_norm,
+        corpse_id: nonzero(row.corpse_id),
+        zone_short: row.zone_short,
+        zone_base: row.zone_base,
+        instance: row.instance,
+        sold: row.sold,
+        coin_copper: row.money_copper,
+        disposition: row.disposition,
+        looter: row.looter,
+        sequence: nonzero(row.sequence),
+        from_corpse: row.source == seq_backend_eql::loot_track::LootSource::Coin,
+        complete: row.complete,
     }
 }
 
@@ -1672,7 +1749,12 @@ mod tests {
             123,
         );
         assert!(session.take_loot_rows().is_empty());
-        assert!(session.flush(FlushReason::ReplayEnd).is_empty());
+        let events = session.flush(FlushReason::ReplayEnd);
+        assert!(matches!(
+            events.as_slice(),
+            [Event::LootAcquired(acquisition)]
+                if acquisition.timestamp == 123 && !acquisition.complete
+        ));
         assert_eq!(session.take_loot_rows().len(), 1);
     }
 

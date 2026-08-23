@@ -211,11 +211,13 @@ mod ffi {
         item_name: String,
         ok: bool,
     }
-    // One durable loot row from EqlLootTracker. `source` is "message" (what the
+    // One compatibility loot row from EqlLootTracker. `source` is "message" (what the
     // player acquired), "window" (corpse contents) or "coin" (a pile); 0 stands
     // in for SQL NULL on the id/icon columns. `sequence` is the confirmation's
     // monotonic counter — the host dedups acquisitions on it, since more than
-    // one recorder may be watching the same capture.
+    // one recorder may be watching the same capture. New host paths consume
+    // LootAcquired and CorpseLootSnapshot instead. `complete` is false when a
+    // session boundary closed an unmatched narration or confirmation.
     struct LootRow {
         ts: i64,
         source: String,
@@ -234,6 +236,7 @@ mod ffi {
         disposition: String,
         looter: String,
         sequence: u32,
+        complete: bool,
     }
     struct MoneyUpdate {
         platinum: u32,
@@ -903,6 +906,8 @@ mod ffi {
         AlternateAdvancementSnapshot = 71,
         AlternateAdvancementUpdated = 72,
         AlternateAbilityDefined = 73,
+        CorpseLootSnapshot = 74,
+        LootAcquired = 75,
     }
 
     struct SessionEventRef {
@@ -1371,6 +1376,39 @@ mod ffi {
         corpse_name: String,
         items: Vec<EventLootItemInfo>,
     }
+    struct EventCorpseLootSnapshot {
+        timestamp: i64,
+        corpse_id: u32,
+        corpse_name: String,
+        corpse_name_normalized: String,
+        zone_short: String,
+        zone_base: String,
+        instance: String,
+        looter: String,
+        items: Vec<EventLootItemInfo>,
+    }
+    struct EventLootAcquisition {
+        timestamp: i64,
+        item_name: String,
+        has_item_id: bool,
+        item_id: u32,
+        quantity: u32,
+        corpse_name: String,
+        corpse_name_normalized: String,
+        has_corpse_id: bool,
+        corpse_id: u32,
+        zone_short: String,
+        zone_base: String,
+        instance: String,
+        sold: bool,
+        coin_copper: u32,
+        disposition: String,
+        looter: String,
+        has_sequence: bool,
+        sequence: u32,
+        from_corpse: bool,
+        complete: bool,
+    }
     struct EventMoney {
         platinum: u32,
         gold: u32,
@@ -1493,6 +1531,8 @@ mod ffi {
         skill_value_updated: Vec<EventSkillValue>,
         loot_transaction: Vec<EventLootTransactionPayload>,
         loot_drops: Vec<EventLootDropsPayload>,
+        corpse_loot_snapshot: Vec<EventCorpseLootSnapshot>,
+        loot_acquired: Vec<EventLootAcquisition>,
         money: Vec<EventMoney>,
         money_balance_updated: Vec<EventMoneyBalance>,
         simple_message: Vec<EventSimpleMessagePayload>,
@@ -2804,6 +2844,49 @@ fn translate_event(batch: &mut ffi::SessionDecodeBatch, event: seq_events::Event
             });
             push_ref(batch, ffi::SessionEventKind::LootDrops, index);
         }
+        Event::CorpseLootSnapshot(snapshot) => {
+            let index = batch.corpse_loot_snapshot.len();
+            batch
+                .corpse_loot_snapshot
+                .push(ffi::EventCorpseLootSnapshot {
+                    timestamp: snapshot.timestamp,
+                    corpse_id: snapshot.corpse_id,
+                    corpse_name: snapshot.corpse_name,
+                    corpse_name_normalized: snapshot.corpse_name_normalized,
+                    zone_short: snapshot.zone_short,
+                    zone_base: snapshot.zone_base,
+                    instance: snapshot.instance,
+                    looter: snapshot.looter,
+                    items: snapshot.items.into_iter().map(event_loot_item).collect(),
+                });
+            push_ref(batch, ffi::SessionEventKind::CorpseLootSnapshot, index);
+        }
+        Event::LootAcquired(acquisition) => {
+            let index = batch.loot_acquired.len();
+            batch.loot_acquired.push(ffi::EventLootAcquisition {
+                timestamp: acquisition.timestamp,
+                item_name: acquisition.item_name,
+                has_item_id: acquisition.item_id.is_some(),
+                item_id: acquisition.item_id.unwrap_or_default(),
+                quantity: acquisition.quantity,
+                corpse_name: acquisition.corpse_name,
+                corpse_name_normalized: acquisition.corpse_name_normalized,
+                has_corpse_id: acquisition.corpse_id.is_some(),
+                corpse_id: acquisition.corpse_id.unwrap_or_default(),
+                zone_short: acquisition.zone_short,
+                zone_base: acquisition.zone_base,
+                instance: acquisition.instance,
+                sold: acquisition.sold,
+                coin_copper: acquisition.coin_copper,
+                disposition: acquisition.disposition,
+                looter: acquisition.looter,
+                has_sequence: acquisition.sequence.is_some(),
+                sequence: acquisition.sequence.unwrap_or_default(),
+                from_corpse: acquisition.from_corpse,
+                complete: acquisition.complete,
+            });
+            push_ref(batch, ffi::SessionEventKind::LootAcquired, index);
+        }
         Event::Money {
             platinum,
             gold,
@@ -3017,6 +3100,8 @@ fn empty_session_batch(
         skill_value_updated: Vec::new(),
         loot_transaction: Vec::new(),
         loot_drops: Vec::new(),
+        corpse_loot_snapshot: Vec::new(),
+        loot_acquired: Vec::new(),
         money: Vec::new(),
         money_balance_updated: Vec::new(),
         simple_message: Vec::new(),
@@ -3339,6 +3424,7 @@ fn loot_rows_to_ffi(rows: Vec<seq_backend_eql::LootRow>) -> Vec<ffi::LootRow> {
             disposition: r.disposition,
             looter: r.looter,
             sequence: r.sequence,
+            complete: r.complete,
         })
         .collect()
 }

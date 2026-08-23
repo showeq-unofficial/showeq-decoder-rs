@@ -238,6 +238,50 @@ pub struct LootItemInfo {
     pub item_id: u32,
 }
 
+/// A final item or coin acquisition after the ordered session has paired the
+/// loot narration with its transaction confirmation.
+///
+/// `complete` is false at a reset, replay end, or shutdown when only one half
+/// reached the session. Optional ids preserve that distinction without making
+/// a host interpret zero sentinels.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LootAcquisition {
+    pub timestamp: i64,
+    pub item_name: String,
+    pub item_id: Option<u32>,
+    pub quantity: u32,
+    pub corpse_name: String,
+    pub corpse_name_normalized: String,
+    pub corpse_id: Option<u32>,
+    pub zone_short: String,
+    pub zone_base: String,
+    pub instance: String,
+    pub sold: bool,
+    pub coin_copper: u32,
+    /// `inventory`, `sold`, `created`, `dropped`, `destroyed`, a named storage
+    /// destination, or `corpse_coin`.
+    pub disposition: String,
+    pub looter: String,
+    pub sequence: Option<u32>,
+    pub from_corpse: bool,
+    pub complete: bool,
+}
+
+/// Final meaning of one corpse-loot window after per-corpse duplicate
+/// suppression. Reopening an unchanged corpse emits no second snapshot.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CorpseLootSnapshot {
+    pub timestamp: i64,
+    pub corpse_id: u32,
+    pub corpse_name: String,
+    pub corpse_name_normalized: String,
+    pub zone_short: String,
+    pub zone_base: String,
+    pub instance: String,
+    pub looter: String,
+    pub items: Vec<LootItemInfo>,
+}
+
 /// One guild present in the zone, from the guild-in-zone opcodes. A spawn's
 /// guild is on the wire only as the (guild_id, server_id) pair — these records
 /// are the sole source of the NAME, so a consumer keys its guild map on the
@@ -798,6 +842,12 @@ pub enum Event {
         corpse_name: String,
         items: Vec<LootItemInfo>,
     },
+    /// A deduplicated corpse window with session-owned timestamp and zone
+    /// context. Direct backend callers still receive [`Event::LootDrops`].
+    CorpseLootSnapshot(Box<CorpseLootSnapshot>),
+    /// A paired item acquisition, corpse coin pile, or an explicitly incomplete
+    /// half closed by a session boundary.
+    LootAcquired(Box<LootAcquisition>),
     /// The carried purse (OP_MoneyUpdate, 0x6414). Denominations are NOT
     /// normalized on the wire — the consumer sums to total copper.
     Money {
