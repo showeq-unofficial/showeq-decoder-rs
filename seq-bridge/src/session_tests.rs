@@ -1,11 +1,13 @@
 use super::*;
 use seq_events::{
     ActiveBuff, AlternateAbilityDefinition, AlternateAbilityRank, AlternateAdvancementProgress,
-    AlternateAdvancementSnapshot, BuffEntry, CastInterruptionReason, CorpseLootSnapshot, DoorInfo,
-    Event, ExperienceProgress, GroundItemInfo, GuildInZone, GuildRosterMember, ItemLocation,
-    ItemTemplate, LootAcquisition, LootItemInfo, MoneyBalance, PlayerAppearance, PlayerIdentity,
-    PlayerVitals, Point3, Pos, ProfileInfo, SessionResetReason, SkillValue, SpawnInfo, Velocity,
-    VitalValue, ZoneEnvironment, ZoneInfo, ZonePointInfo,
+    AlternateAdvancementSnapshot, BuffEntry, CastInterruptionReason, ChatMessage, ChatMessageKind,
+    CorpseLootSnapshot, DoorInfo, DynamicZoneState, Event, ExperienceProgress, GroundItemInfo,
+    GroupMember, GroupRosterState, GuildInZone, GuildMotdState, GuildRankNameEntry,
+    GuildRankNamesState, GuildRosterMember, GuildRosterState, ItemLocation, ItemTemplate,
+    LootAcquisition, LootItemInfo, MoneyBalance, PlayerAppearance, PlayerIdentity, PlayerVitals,
+    Point3, Pos, ProfileInfo, SessionResetReason, SkillValue, SpawnInfo, Velocity, VitalValue,
+    ZoneEnvironment, ZoneInfo, ZonePointInfo,
 };
 
 fn pos(seed: i32) -> Pos {
@@ -323,6 +325,11 @@ fn canonical_events() -> Vec<Event> {
         Event::GuildRoster {
             guild_id: 181,
             members: vec![member()],
+        },
+        Event::GuildRosterWire {
+            guild_id: 181,
+            members: vec![member()],
+            complete: false,
         },
         Event::ZoneServerInfo {
             host: "host".into(),
@@ -662,6 +669,87 @@ fn canonical_events() -> Vec<Event> {
             yourname: "you".into(),
             membername: "member".into(),
         },
+        Event::ChatMessage(ChatMessage {
+            kind: ChatMessageKind::Formatted,
+            channel: 19,
+            from: "speaker".into(),
+            target: "listener".into(),
+            text: "text".into(),
+            chat_color: 320,
+            channel_name: "General".into(),
+            format_id: Some(1234),
+            args: vec!["one".into(), "two".into()],
+        }),
+        Event::UcsRecord {
+            channel_first: b'G',
+            channel_rest: "eneral".into(),
+            channel_run: "General".into(),
+            sender: "sender".into(),
+            message: "ucs".into(),
+            spam: true,
+        },
+        Event::GroupRosterWire {
+            group_id: 260,
+            member_count: 2,
+            names: vec!["self".into(), "peer".into()],
+            complete: true,
+        },
+        Event::GroupRosterUpdated(GroupRosterState {
+            group_id: Some(260),
+            members: vec![GroupMember {
+                slot: 2,
+                name: "peer".into(),
+                level: Some(65),
+            }],
+            complete: false,
+        }),
+        Event::GuildRosterUpdated(GuildRosterState {
+            guild_id: 261,
+            members: vec![member()],
+            complete: true,
+        }),
+        Event::GuildMemberStatus {
+            name: "guildmate".into(),
+            zone_id: 262,
+            instance_id: 263,
+            last_on: 264,
+        },
+        Event::GuildMotdUpdated(GuildMotdState {
+            guild_id: 265,
+            message: "motd state".into(),
+            sender: "setter".into(),
+        }),
+        Event::GuildRankNamesUpdated(GuildRankNamesState {
+            guild_id: 266,
+            ranks: vec![GuildRankNameEntry {
+                rank_index: 3,
+                rank_name: "Officer".into(),
+            }],
+        }),
+        Event::DynamicZoneInfo {
+            active: true,
+            max_players: 54,
+            expedition_name: "expedition".into(),
+            leader_name: "leader".into(),
+        },
+        Event::DynamicZoneSwitch {
+            active: true,
+            zone_id: Some(267),
+            instance_id: None,
+            kind: Some(5),
+            position: Some(point3(268.0)),
+        },
+        Event::DynamicZoneUpdated(DynamicZoneState {
+            active: true,
+            zone_id: Some(269),
+            instance_id: Some(7),
+            kind: None,
+            position: None,
+            max_players: Some(6),
+            expedition_name: "dz".into(),
+            leader_name: "lead".into(),
+            complete: true,
+        }),
         Event::LevelUpdate {
             level: 252,
             level_old: 253,
@@ -1566,6 +1654,145 @@ fn reconstruct(batch: &ffi::SessionDecodeBatch) -> Vec<Event> {
                         membername: p.membername.clone(),
                     }
                 }
+                ffi::SessionEventKind::ChatMessage => {
+                    let p = &batch.chat_message[i];
+                    let kind = match p.kind {
+                        ffi::EventChatMessageKind::Common => ChatMessageKind::Common,
+                        ffi::EventChatMessageKind::Simple => ChatMessageKind::Simple,
+                        ffi::EventChatMessageKind::Formatted => ChatMessageKind::Formatted,
+                        ffi::EventChatMessageKind::Special => ChatMessageKind::Special,
+                        ffi::EventChatMessageKind::Loot => ChatMessageKind::Loot,
+                        ffi::EventChatMessageKind::Ucs => ChatMessageKind::Ucs,
+                        _ => unreachable!(),
+                    };
+                    Event::ChatMessage(ChatMessage {
+                        kind,
+                        channel: p.channel,
+                        from: p.from.clone(),
+                        target: p.target.clone(),
+                        text: p.text.clone(),
+                        chat_color: p.chat_color,
+                        channel_name: p.channel_name.clone(),
+                        format_id: p.has_format_id.then_some(p.format_id),
+                        args: p.args.clone(),
+                    })
+                }
+                ffi::SessionEventKind::UcsRecord => {
+                    let p = &batch.ucs_record[i];
+                    Event::UcsRecord {
+                        channel_first: p.channel_first,
+                        channel_rest: p.channel_rest.clone(),
+                        channel_run: p.channel_run.clone(),
+                        sender: p.sender.clone(),
+                        message: p.message.clone(),
+                        spam: p.spam,
+                    }
+                }
+                ffi::SessionEventKind::GroupRosterWire => {
+                    let p = &batch.group_roster_wire[i];
+                    Event::GroupRosterWire {
+                        group_id: p.group_id,
+                        member_count: p.member_count,
+                        names: p.names.clone(),
+                        complete: p.complete,
+                    }
+                }
+                ffi::SessionEventKind::GroupRosterUpdated => {
+                    let p = &batch.group_roster_updated[i];
+                    Event::GroupRosterUpdated(GroupRosterState {
+                        group_id: p.has_group_id.then_some(p.group_id),
+                        members: p
+                            .members
+                            .iter()
+                            .map(|member| GroupMember {
+                                slot: member.slot,
+                                name: member.name.clone(),
+                                level: member.has_level.then_some(member.level),
+                            })
+                            .collect(),
+                        complete: p.complete,
+                    })
+                }
+                ffi::SessionEventKind::GuildRosterUpdated => {
+                    let p = &batch.guild_roster_updated[i];
+                    Event::GuildRosterUpdated(GuildRosterState {
+                        guild_id: p.guild_id,
+                        members: p.members.iter().map(unmember).collect(),
+                        complete: p.complete,
+                    })
+                }
+                ffi::SessionEventKind::GuildRosterWire => {
+                    let p = &batch.guild_roster_wire[i];
+                    Event::GuildRosterWire {
+                        guild_id: p.guild_id,
+                        members: p.members.iter().map(unmember).collect(),
+                        complete: p.complete,
+                    }
+                }
+                ffi::SessionEventKind::GuildMemberStatus => {
+                    let p = &batch.guild_member_status[i];
+                    Event::GuildMemberStatus {
+                        name: p.name.clone(),
+                        zone_id: p.zone_id,
+                        instance_id: p.instance_id,
+                        last_on: p.last_on,
+                    }
+                }
+                ffi::SessionEventKind::GuildMotdUpdated => {
+                    let p = &batch.guild_motd_updated[i];
+                    Event::GuildMotdUpdated(GuildMotdState {
+                        guild_id: p.guild_id,
+                        message: p.message.clone(),
+                        sender: p.sender.clone(),
+                    })
+                }
+                ffi::SessionEventKind::GuildRankNamesUpdated => {
+                    let p = &batch.guild_rank_names_updated[i];
+                    Event::GuildRankNamesUpdated(GuildRankNamesState {
+                        guild_id: p.guild_id,
+                        ranks: p
+                            .ranks
+                            .iter()
+                            .map(|rank| GuildRankNameEntry {
+                                rank_index: rank.rank_index,
+                                rank_name: rank.rank_name.clone(),
+                            })
+                            .collect(),
+                    })
+                }
+                ffi::SessionEventKind::DynamicZoneInfo => {
+                    let p = &batch.dynamic_zone_info[i];
+                    Event::DynamicZoneInfo {
+                        active: p.active,
+                        max_players: p.max_players,
+                        expedition_name: p.expedition_name.clone(),
+                        leader_name: p.leader_name.clone(),
+                    }
+                }
+                ffi::SessionEventKind::DynamicZoneSwitch => {
+                    let p = &batch.dynamic_zone_switch[i];
+                    Event::DynamicZoneSwitch {
+                        active: p.active,
+                        zone_id: p.has_zone_id.then_some(p.zone_id),
+                        instance_id: p.has_instance_id.then_some(p.instance_id),
+                        kind: p.has_kind.then_some(p.kind),
+                        position: p.has_position.then(|| unpoint3(&p.position)),
+                    }
+                }
+                ffi::SessionEventKind::DynamicZoneUpdated => {
+                    let p = &batch.dynamic_zone_updated[i];
+                    Event::DynamicZoneUpdated(DynamicZoneState {
+                        active: p.active,
+                        zone_id: p.has_zone_id.then_some(p.zone_id),
+                        instance_id: p.has_instance_id.then_some(p.instance_id),
+                        kind: p.has_kind.then_some(p.kind),
+                        position: p.has_position.then(|| unpoint3(&p.position)),
+                        max_players: p.has_max_players.then_some(p.max_players),
+                        expedition_name: p.expedition_name.clone(),
+                        leader_name: p.leader_name.clone(),
+                        complete: p.complete,
+                    })
+                }
                 ffi::SessionEventKind::LevelUpdate => {
                     let p = &batch.level_update[i];
                     Event::LevelUpdate {
@@ -1653,6 +1880,37 @@ fn malformed_fixture() -> (u16, ffi::SessionDirection) {
     return (0xaaed, ffi::SessionDirection::ServerToClient);
     #[cfg(feature = "backend-eql")]
     return (0x6afc, ffi::SessionDirection::ServerToClient);
+}
+
+#[cfg(feature = "backend-eql")]
+fn encode_ucs(plain: &[u8]) -> Vec<u8> {
+    let mut encoded = plain.to_vec();
+    for index in 4..plain.len() {
+        encoded[index] = plain[index] ^ encoded[index - 4];
+    }
+    encoded
+}
+
+#[cfg(feature = "backend-eql")]
+#[test]
+fn stateful_bridge_owns_ucs_channel_recovery() {
+    let registry = session_protocol_registry_new("").unwrap();
+    let mut session = session_new(&registry, ffi::SessionBackend::Eql).unwrap();
+    let mut plain = vec![1, 2, 3, 4];
+    plain.extend_from_slice(b"General\0Server.Alice\0hello\0SPAM:7:0\0");
+    let batch = session.decode_ucs(ffi::SessionDirection::ServerToClient, &encode_ucs(&plain));
+    assert!(batch.disposition == ffi::SessionDisposition::Decoded);
+    assert_eq!(batch.events.len(), 2);
+    assert!(batch.events[0].kind == ffi::SessionEventKind::UcsRecord);
+    assert!(batch.events[1].kind == ffi::SessionEventKind::ChatMessage);
+    assert!(batch.ucs_record[0].spam);
+    assert!(batch.chat_message[0].kind == ffi::EventChatMessageKind::Ucs);
+    assert_eq!(batch.chat_message[0].channel_name, "General");
+    assert_eq!(batch.chat_message[0].text, "(SPAM) hello");
+
+    let outbound = session.decode_ucs(ffi::SessionDirection::ClientToServer, &[0; 20]);
+    assert!(outbound.disposition == ffi::SessionDisposition::Ignored);
+    assert!(outbound.events.is_empty());
 }
 
 #[cfg(feature = "backend-eql")]

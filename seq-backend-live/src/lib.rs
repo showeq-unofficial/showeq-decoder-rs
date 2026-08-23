@@ -70,6 +70,8 @@ impl Backend for LiveBackend {
             "OP_GuildsInZoneList" => guilds_in_zone_list(bytes),
             "OP_NewGuildInZone" => new_guild_in_zone(bytes),
             "OP_GuildMemberList" => guild_roster(bytes),
+            "OP_GuildMemberUpdate" if dir == Dir::ServerToClient => guild_member_status(bytes),
+            "OP_GuildMemberUpdate" => Decoded::Ignored,
             "OP_GuildMOTD" => guild_motd(bytes),
             "OP_ExpandedGuildInfo" => expanded_guild_info(bytes),
             "OP_ExpUpdate" => exp(bytes),
@@ -80,6 +82,12 @@ impl Backend for LiveBackend {
             "OP_ZoneServerInfo" => Decoded::Ignored,
             "OP_GroupFollow" => group_follow(bytes),
             "OP_GroupDisband" | "OP_GroupDisband2" => group_disband(bytes),
+            "OP_GroupMemberList" if dir == Dir::ServerToClient => group_roster(bytes),
+            "OP_GroupMemberList" => Decoded::Ignored,
+            "OP_DzInfo" if dir == Dir::ServerToClient => dynamic_zone_info(bytes),
+            "OP_DzInfo" => Decoded::Ignored,
+            "OP_DzSwitchInfo" if dir == Dir::ServerToClient => dynamic_zone_switch(bytes),
+            "OP_DzSwitchInfo" => Decoded::Ignored,
             "OP_EnterWorld" if dir == Dir::ClientToServer => enter_world(bytes),
             "OP_EnterWorld" => Decoded::Ignored,
             _ => Decoded::Unhandled,
@@ -786,7 +794,7 @@ fn guild_in_zone(g: seq_decode::guild_in_zone::GuildInZone) -> GuildInZone {
 fn guild_roster(bytes: &[u8]) -> Decoded {
     match seq_decode::guild_roster::parse_guild_member_list(bytes) {
         Ok(r) => {
-            let members = r
+            let members: Vec<GuildRosterMember> = r
                 .members
                 .into_iter()
                 .map(|m| GuildRosterMember {
@@ -803,11 +811,30 @@ fn guild_roster(bytes: &[u8]) -> Decoded {
                     zone_id: 0,
                 })
                 .collect();
-            Decoded::One(Event::GuildRoster {
-                guild_id: r.guild_id,
-                members,
-            })
+            Decoded::Many(vec![
+                Event::GuildRoster {
+                    guild_id: r.guild_id,
+                    members: members.clone(),
+                },
+                Event::GuildRosterWire {
+                    guild_id: r.guild_id,
+                    members,
+                    complete: r.complete,
+                },
+            ])
         }
+        Err(_) => Decoded::Malformed,
+    }
+}
+
+fn guild_member_status(bytes: &[u8]) -> Decoded {
+    match seq_decode::guild_member_update::parse_guild_member_update(bytes) {
+        Ok(member) => Decoded::One(Event::GuildMemberStatus {
+            name: member.name,
+            zone_id: u32::from(member.zone_id),
+            instance_id: u32::from(member.zone_instance),
+            last_on: member.last_on,
+        }),
         Err(_) => Decoded::Malformed,
     }
 }
@@ -918,6 +945,69 @@ fn group_disband(bytes: &[u8]) -> Decoded {
         Ok(g) => Decoded::One(Event::GroupDisband {
             yourname: g.yourname,
             membername: g.membername,
+        }),
+        Err(_) => Decoded::Malformed,
+    }
+}
+
+fn group_roster(bytes: &[u8]) -> Decoded {
+    match seq_decode::group_member_list::parse_group_member_list(bytes) {
+        Ok(roster) if roster.member_count == 0 || roster.member_count > 6 => Decoded::Ignored,
+        Ok(roster) => {
+            let unique = unique_names(&roster.names);
+            let complete = unique.len() >= roster.member_count as usize;
+            Decoded::One(Event::GroupRosterWire {
+                group_id: roster.group_id,
+                member_count: roster.member_count,
+                names: roster.names,
+                complete,
+            })
+        }
+        Err(_) => Decoded::Malformed,
+    }
+}
+
+fn unique_names(names: &[String]) -> std::collections::BTreeSet<&str> {
+    names
+        .iter()
+        .map(String::as_str)
+        .filter(|name| !name.is_empty())
+        .collect()
+}
+
+fn dynamic_zone_info(bytes: &[u8]) -> Decoded {
+    match seq_decode::dz_info::parse_dz_info(bytes) {
+        Ok(info) => Decoded::One(Event::DynamicZoneInfo {
+            active: info.new_dz != 0,
+            max_players: info.max_players,
+            expedition_name: info.dz_name,
+            leader_name: info.name,
+        }),
+        Err(_) => Decoded::Malformed,
+    }
+}
+
+fn dynamic_zone_switch(bytes: &[u8]) -> Decoded {
+    if bytes.len() == 8 {
+        return Decoded::One(Event::DynamicZoneSwitch {
+            active: false,
+            zone_id: None,
+            instance_id: None,
+            kind: None,
+            position: None,
+        });
+    }
+    match seq_decode::dz_switch_info::parse_dz_switch_info(bytes) {
+        Ok(switch) => Decoded::One(Event::DynamicZoneSwitch {
+            active: true,
+            zone_id: Some(switch.zone_id),
+            instance_id: Some(switch.instance_id),
+            kind: Some(switch.kind),
+            position: Some(Point3 {
+                x: switch.x,
+                y: switch.y,
+                z: switch.z,
+            }),
         }),
         Err(_) => Decoded::Malformed,
     }

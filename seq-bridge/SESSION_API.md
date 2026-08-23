@@ -84,6 +84,40 @@ The low-level `Combat`, `SpellAction`, `SpellCastRequest`, `SpawnCast`,
 `BuffList`, and `BuffWire` variants remain additive until both host family
 selectors cut over.
 
+Communication-family consumers use `ChatMessage`, `GroupRosterUpdated`,
+`GuildRosterUpdated`, `GuildMotdUpdated`, `GuildRankNamesUpdated`, and
+`DynamicZoneUpdated`. `ChatMessage.kind` identifies common, simple, formatted,
+special, loot, or UCS input. Common, special, loot, and UCS events carry final
+Latin-1-decoded display text. Simple and formatted events carry `format_id` and
+ordered `args`; the host resolves those through its existing eqstr database,
+then writes the result into the seq.v1 chat text field. Rust selects the final
+channel, resolves a special-message target from the entity index, strips EQ
+links, rejects direction echoes, repairs UCS channel names, and adds the
+`(SPAM) ` prefix.
+
+UCS has no application opcode. Feed its raw port-9877 payload to
+`SessionResource::decode_ucs`; this keeps SEQA world/zone framing unchanged.
+The method is EQL-only, ignores the client-to-server side, and shares reset
+state with the owning game session. The old `decode_ucs_chat` and
+`decode_ucs_channels` functions remain for shadow comparison only.
+
+Group state has five stable peer slots and excludes the local player. A full
+`GroupRosterWire` replaces missing peers only when `complete` is true. Partial
+rosters and follow packets merge into known slots without inventing a complete
+snapshot. Disband packets remove one peer or clear all peers. Guild status
+packets merge into the last full roster, MOTD packets receive the correlated
+guild id, and rank-name events contain the full table accumulated so far.
+Dynamic-zone info and switch packets merge into one state. `complete` becomes
+true after both halves arrive; either explicit quit form produces a complete
+inactive state.
+
+The repository has synthetic numeric fixtures for Live, Test, and EQL, plus an
+EQL UCS fixture. It still lacks capture-derived phase-10 goldens for current
+Live and Test group rosters, all currently unmapped dynamic-zone opcode ids,
+EQL guild-member deltas, non-General UCS framing outliers, and reconnects that
+cross a real UCS socket rotation. Hosts should keep the phase selector in
+shadow mode for those cases until captures exist.
+
 Lifecycle batches have strict ordering. A reset caused by `OP_EnterWorld`, a
 profile, or a confirmed Live/Test zone transition precedes the event that
 caused it. `OP_NewZone` emits `ZoneChanged` followed by

@@ -40,7 +40,7 @@ pub struct UcsRecord {
 
 #[inline]
 fn printable(c: u8) -> bool {
-    (0x20..0x7f).contains(&c)
+    (0x20..0x7f).contains(&c) || c >= 0xa0
 }
 
 #[inline]

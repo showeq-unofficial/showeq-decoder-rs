@@ -502,6 +502,108 @@ pub struct GuildRosterMember {
     pub zone_id: u32,
 }
 
+/// Where a final chat line came from. The source matters for projection because
+/// localized server messages still need the host's eqstr table, while all other
+/// forms already carry display text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum ChatMessageKind {
+    Common = 0,
+    Simple = 1,
+    Formatted = 2,
+    Special = 3,
+    Loot = 4,
+    Ucs = 5,
+}
+
+/// Final chat meaning owned by the ordered session.
+///
+/// `format_id` is present only for simple and formatted server messages. Their
+/// `text` stays empty until a host projector resolves the id against its eqstr
+/// database. Rust still owns channel selection, arguments, link-cleaned direct
+/// text, target-name correlation, UCS channel recovery, spam marking, and
+/// direction de-duplication.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChatMessage {
+    pub kind: ChatMessageKind,
+    pub channel: u32,
+    pub from: String,
+    pub target: String,
+    pub text: String,
+    pub chat_color: u32,
+    pub channel_name: String,
+    pub format_id: Option<u32>,
+    pub args: Vec<String>,
+}
+
+/// One stable peer slot in the local player's group. The local player is not
+/// included, matching the five-peer seq.v1 contract.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GroupMember {
+    pub slot: u8,
+    pub name: String,
+    /// Absent when the roster wire carried only a name.
+    pub level: Option<u32>,
+}
+
+/// Current group knowledge after applying a full roster or an incremental
+/// follow/disband packet. `complete` is false after a cold attachment or reset
+/// until the session observes a structurally complete roster.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GroupRosterState {
+    pub group_id: Option<u32>,
+    pub members: Vec<GroupMember>,
+    pub complete: bool,
+}
+
+/// Current guild roster knowledge. A status delta is merged into the last full
+/// roster before this event is emitted.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GuildRosterState {
+    pub guild_id: u32,
+    pub members: Vec<GuildRosterMember>,
+    pub complete: bool,
+}
+
+/// The guild message of the day with the roster-correlated guild id.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GuildMotdState {
+    pub guild_id: u32,
+    pub message: String,
+    pub sender: String,
+}
+
+/// One accumulated guild rank-name entry.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GuildRankNameEntry {
+    pub rank_index: u32,
+    pub rank_name: String,
+}
+
+/// Current accumulated guild rank-name table, sorted by rank index.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GuildRankNamesState {
+    pub guild_id: u32,
+    pub ranks: Vec<GuildRankNameEntry>,
+}
+
+/// Current dynamic-zone or expedition state assembled from the independent
+/// info and switch packets.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DynamicZoneState {
+    pub active: bool,
+    pub zone_id: Option<u16>,
+    pub instance_id: Option<u16>,
+    pub kind: Option<u32>,
+    pub position: Option<Point3>,
+    pub max_players: Option<u32>,
+    pub expedition_name: String,
+    pub leader_name: String,
+    /// True once both the info and switch halves have arrived. An explicit quit
+    /// is complete immediately.
+    pub complete: bool,
+}
+
 /// A single door / static object row from OP_SpawnDoor.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DoorInfo {
@@ -721,6 +823,25 @@ pub enum Event {
         guild_id: u32,
         members: Vec<GuildRosterMember>,
     },
+    /// Low-level guild roster with structural completeness. A partial prefix is
+    /// additive and never replaces a session's last complete roster.
+    GuildRosterWire {
+        guild_id: u32,
+        members: Vec<GuildRosterMember>,
+        complete: bool,
+    },
+    /// Final guild roster after session-owned replacement and member-status
+    /// correlation. The low-level [`Event::GuildRoster`] remains available
+    /// during host migration.
+    GuildRosterUpdated(GuildRosterState),
+    /// Low-level one-member online/offline update. A session folds this into
+    /// [`Event::GuildRosterUpdated`].
+    GuildMemberStatus {
+        name: String,
+        zone_id: u32,
+        instance_id: u32,
+        last_on: u32,
+    },
     /// The world->zone handoff (OP_ZoneServerInfo): which zone server the client
     /// was just told to connect to.
     ///
@@ -769,6 +890,8 @@ pub enum Event {
     /// implicitly the local player's guild — so the consumer stamps it from the
     /// roster it tracks (0 if none has arrived).
     GuildMotd { message: String, sender: String },
+    /// Final MOTD with its guild id resolved from session roster state.
+    GuildMotdUpdated(GuildMotdState),
     /// One entry of the guild's rank-name table (OP_ExpandedGuildInfo). Guilds
     /// rename their ranks freely, so a `GuildRosterMember.rank` only means
     /// something against this table. One arrives per rank (right after the
@@ -779,6 +902,8 @@ pub enum Event {
         rank_index: u32,
         rank_name: String,
     },
+    /// Final accumulated rank-name table after one rank packet.
+    GuildRankNamesUpdated(GuildRankNamesState),
     /// Low-level eql OP_LoadoutSwap result retained for direct backend callers.
     /// A stateful session emits a player or spawn identity update, changing
     /// their class + level. eql sends no OP_PlayerProfile on a swap, so this is
@@ -986,6 +1111,19 @@ pub enum Event {
         chat_color: u32,
         channel_name: String,
     },
+    /// Final chat meaning. Direct text is decoded and link-cleaned. Localized
+    /// messages carry `format_id` and arguments for the host eqstr projector.
+    ChatMessage(ChatMessage),
+    /// Low-level decoded UCS record retained for adapter diagnostics. A session
+    /// repairs the masked channel name and emits [`Event::ChatMessage`] after it.
+    UcsRecord {
+        channel_first: u8,
+        channel_rest: String,
+        channel_run: String,
+        sender: String,
+        message: String,
+        spam: bool,
+    },
     /// The authoritative active-buff list for one spawn (eql OP_BuffList), sent
     /// at zone-in and on every buff change. A full snapshot: the consumer
     /// REPLACES that owner's buffs. `owner` == the player → the buff panel; a
@@ -1020,6 +1158,34 @@ pub enum Event {
         yourname: String,
         membername: String,
     },
+    /// Low-level full group-roster scan. `complete` reports whether the declared
+    /// member count was fully represented by unique decoded names.
+    GroupRosterWire {
+        group_id: u32,
+        member_count: u32,
+        names: Vec<String>,
+        complete: bool,
+    },
+    /// Final stable peer-slot state after full and incremental roster packets.
+    GroupRosterUpdated(GroupRosterState),
+    /// Low-level dynamic-zone information half.
+    DynamicZoneInfo {
+        active: bool,
+        max_players: u32,
+        expedition_name: String,
+        leader_name: String,
+    },
+    /// Low-level dynamic-zone switch half. `active: false` is the eight-byte
+    /// quit form and carries no destination fields.
+    DynamicZoneSwitch {
+        active: bool,
+        zone_id: Option<u16>,
+        instance_id: Option<u16>,
+        kind: Option<u32>,
+        position: Option<Point3>,
+    },
+    /// Final dynamic-zone state assembled by the ordered session.
+    DynamicZoneUpdated(DynamicZoneState),
     /// The player levelled (OP_LevelUpdate). `level` is absolute, not a delta —
     /// consumers should assign it rather than increment. `exp` is the post-ding
     /// exp value, which cross-references the next Exp event.

@@ -831,6 +831,14 @@ mod ffi {
         ReplayEnd = 3,
         Shutdown = 4,
     }
+    enum EventChatMessageKind {
+        Common = 0,
+        Simple = 1,
+        Formatted = 2,
+        Special = 3,
+        Loot = 4,
+        Ucs = 5,
+    }
     enum SessionDisposition {
         Decoded = 0,
         Ignored = 1,
@@ -925,6 +933,18 @@ mod ffi {
         BuffAdded = 83,
         BuffUpdated = 84,
         BuffRemoved = 85,
+        ChatMessage = 86,
+        UcsRecord = 87,
+        GroupRosterWire = 88,
+        GroupRosterUpdated = 89,
+        GuildRosterUpdated = 90,
+        GuildMemberStatus = 91,
+        GuildMotdUpdated = 92,
+        GuildRankNamesUpdated = 93,
+        DynamicZoneInfo = 94,
+        DynamicZoneSwitch = 95,
+        DynamicZoneUpdated = 96,
+        GuildRosterWire = 97,
     }
 
     struct SessionEventRef {
@@ -1518,6 +1538,26 @@ mod ffi {
         chat_color: u32,
         channel_name: String,
     }
+    struct EventChatMessage {
+        kind: EventChatMessageKind,
+        channel: u32,
+        from: String,
+        target: String,
+        text: String,
+        chat_color: u32,
+        channel_name: String,
+        has_format_id: bool,
+        format_id: u32,
+        args: Vec<String>,
+    }
+    struct EventUcsRecord {
+        channel_first: u8,
+        channel_rest: String,
+        channel_run: String,
+        sender: String,
+        message: String,
+        spam: bool,
+    }
     struct EventBuffList {
         owner: u32,
         entries: Vec<EventBuffEntry>,
@@ -1557,6 +1597,81 @@ mod ffi {
     struct EventGroupDisbandPayload {
         yourname: String,
         membername: String,
+    }
+    struct EventGroupMember {
+        slot: u8,
+        name: String,
+        has_level: bool,
+        level: u32,
+    }
+    struct EventGroupRosterWire {
+        group_id: u32,
+        member_count: u32,
+        names: Vec<String>,
+        complete: bool,
+    }
+    struct EventGroupRosterState {
+        has_group_id: bool,
+        group_id: u32,
+        members: Vec<EventGroupMember>,
+        complete: bool,
+    }
+    struct EventGuildRosterState {
+        guild_id: u32,
+        members: Vec<EventGuildRosterMember>,
+        complete: bool,
+    }
+    struct EventGuildMemberStatus {
+        name: String,
+        zone_id: u32,
+        instance_id: u32,
+        last_on: u32,
+    }
+    struct EventGuildMotdState {
+        guild_id: u32,
+        message: String,
+        sender: String,
+    }
+    struct EventGuildRankNameEntry {
+        rank_index: u32,
+        rank_name: String,
+    }
+    struct EventGuildRankNamesState {
+        guild_id: u32,
+        ranks: Vec<EventGuildRankNameEntry>,
+    }
+    struct EventDynamicZoneInfo {
+        active: bool,
+        max_players: u32,
+        expedition_name: String,
+        leader_name: String,
+    }
+    struct EventDynamicZoneSwitch {
+        active: bool,
+        has_zone_id: bool,
+        zone_id: u16,
+        has_instance_id: bool,
+        instance_id: u16,
+        has_kind: bool,
+        kind: u32,
+        has_position: bool,
+        position: EventPoint3,
+    }
+    struct EventDynamicZoneState {
+        active: bool,
+        has_zone_id: bool,
+        zone_id: u16,
+        has_instance_id: bool,
+        instance_id: u16,
+        has_kind: bool,
+        kind: u32,
+        has_position: bool,
+        position: EventPoint3,
+        has_max_players: bool,
+        max_players: u32,
+        expedition_name: String,
+        leader_name: String,
+        complete: bool,
     }
     struct EventLevelUpdatePayload {
         level: u32,
@@ -1642,6 +1757,8 @@ mod ffi {
         special_message: Vec<EventSpecialMessagePayload>,
         loot_message: Vec<EventLootMessagePayload>,
         chat: Vec<EventChat>,
+        chat_message: Vec<EventChatMessage>,
+        ucs_record: Vec<EventUcsRecord>,
         buff_list: Vec<EventBuffList>,
         buff_wire: Vec<EventBuffWire>,
         buff_added: Vec<EventActiveBuff>,
@@ -1649,6 +1766,16 @@ mod ffi {
         buff_removed: Vec<EventBuffRemoved>,
         group_follow: Vec<EventGroupFollowPayload>,
         group_disband: Vec<EventGroupDisbandPayload>,
+        group_roster_wire: Vec<EventGroupRosterWire>,
+        group_roster_updated: Vec<EventGroupRosterState>,
+        guild_roster_updated: Vec<EventGuildRosterState>,
+        guild_roster_wire: Vec<EventGuildRosterState>,
+        guild_member_status: Vec<EventGuildMemberStatus>,
+        guild_motd_updated: Vec<EventGuildMotdState>,
+        guild_rank_names_updated: Vec<EventGuildRankNamesState>,
+        dynamic_zone_info: Vec<EventDynamicZoneInfo>,
+        dynamic_zone_switch: Vec<EventDynamicZoneSwitch>,
+        dynamic_zone_updated: Vec<EventDynamicZoneState>,
         level_update: Vec<EventLevelUpdatePayload>,
         enter_world: Vec<EventEnterWorld>,
         self_stats: Vec<SelfStat>,
@@ -1679,6 +1806,11 @@ mod ffi {
             direction: SessionDirection,
             payload: &[u8],
             timestamp: i64,
+        ) -> SessionDecodeBatch;
+        fn decode_ucs(
+            self: &mut SessionResource,
+            direction: SessionDirection,
+            payload: &[u8],
         ) -> SessionDecodeBatch;
         fn flush(self: &mut SessionResource, reason: SessionFlushReason) -> SessionDecodeBatch;
 
@@ -1913,6 +2045,23 @@ impl SessionResource {
         batch
     }
 
+    fn decode_ucs(
+        &mut self,
+        direction: ffi::SessionDirection,
+        payload: &[u8],
+    ) -> ffi::SessionDecodeBatch {
+        let decoded = self
+            .session
+            .decode_ucs(session_direction(direction), payload);
+        let mut batch = translate_events(
+            decoded.protocol_generation.0,
+            session_disposition(decoded.disposition),
+            decoded.events,
+        );
+        self.drain_correlations(&mut batch);
+        batch
+    }
+
     fn flush(&mut self, reason: ffi::SessionFlushReason) -> ffi::SessionDecodeBatch {
         let events = self.session.flush(session_flush_reason(reason));
         let generation = self.registry.snapshot(self.backend).generation().0;
@@ -2006,6 +2155,52 @@ fn event_session_reset_reason(
             ffi::EventSessionResetReason::ZoneTransition
         }
         seq_events::SessionResetReason::Explicit => ffi::EventSessionResetReason::Explicit,
+    }
+}
+
+fn event_chat_message_kind(kind: seq_events::ChatMessageKind) -> ffi::EventChatMessageKind {
+    match kind {
+        seq_events::ChatMessageKind::Common => ffi::EventChatMessageKind::Common,
+        seq_events::ChatMessageKind::Simple => ffi::EventChatMessageKind::Simple,
+        seq_events::ChatMessageKind::Formatted => ffi::EventChatMessageKind::Formatted,
+        seq_events::ChatMessageKind::Special => ffi::EventChatMessageKind::Special,
+        seq_events::ChatMessageKind::Loot => ffi::EventChatMessageKind::Loot,
+        seq_events::ChatMessageKind::Ucs => ffi::EventChatMessageKind::Ucs,
+    }
+}
+
+fn event_group_member(member: seq_events::GroupMember) -> ffi::EventGroupMember {
+    ffi::EventGroupMember {
+        slot: member.slot,
+        name: member.name,
+        has_level: member.level.is_some(),
+        level: member.level.unwrap_or_default(),
+    }
+}
+
+fn event_dynamic_zone_state(state: seq_events::DynamicZoneState) -> ffi::EventDynamicZoneState {
+    ffi::EventDynamicZoneState {
+        active: state.active,
+        has_zone_id: state.zone_id.is_some(),
+        zone_id: state.zone_id.unwrap_or_default(),
+        has_instance_id: state.instance_id.is_some(),
+        instance_id: state.instance_id.unwrap_or_default(),
+        has_kind: state.kind.is_some(),
+        kind: state.kind.unwrap_or_default(),
+        has_position: state.position.is_some(),
+        position: state.position.map_or(
+            ffi::EventPoint3 {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+            },
+            event_point3,
+        ),
+        has_max_players: state.max_players.is_some(),
+        max_players: state.max_players.unwrap_or_default(),
+        expedition_name: state.expedition_name,
+        leader_name: state.leader_name,
+        complete: state.complete,
     }
 }
 
@@ -2652,6 +2847,43 @@ fn translate_event(batch: &mut ffi::SessionDecodeBatch, event: seq_events::Event
             });
             push_ref(batch, ffi::SessionEventKind::GuildRoster, index);
         }
+        Event::GuildRosterUpdated(state) => {
+            let index = batch.guild_roster_updated.len();
+            batch.guild_roster_updated.push(ffi::EventGuildRosterState {
+                guild_id: state.guild_id,
+                members: state.members.into_iter().map(event_roster_member).collect(),
+                complete: state.complete,
+            });
+            push_ref(batch, ffi::SessionEventKind::GuildRosterUpdated, index);
+        }
+        Event::GuildRosterWire {
+            guild_id,
+            members,
+            complete,
+        } => {
+            let index = batch.guild_roster_wire.len();
+            batch.guild_roster_wire.push(ffi::EventGuildRosterState {
+                guild_id,
+                members: members.into_iter().map(event_roster_member).collect(),
+                complete,
+            });
+            push_ref(batch, ffi::SessionEventKind::GuildRosterWire, index);
+        }
+        Event::GuildMemberStatus {
+            name,
+            zone_id,
+            instance_id,
+            last_on,
+        } => {
+            let index = batch.guild_member_status.len();
+            batch.guild_member_status.push(ffi::EventGuildMemberStatus {
+                name,
+                zone_id,
+                instance_id,
+                last_on,
+            });
+            push_ref(batch, ffi::SessionEventKind::GuildMemberStatus, index);
+        }
         Event::ZoneServerInfo { host, port } => {
             let index = batch.zone_server_info.len();
             batch
@@ -2730,6 +2962,15 @@ fn translate_event(batch: &mut ffi::SessionDecodeBatch, event: seq_events::Event
                 .push(ffi::EventGuildMotdPayload { message, sender });
             push_ref(batch, ffi::SessionEventKind::GuildMotd, index);
         }
+        Event::GuildMotdUpdated(state) => {
+            let index = batch.guild_motd_updated.len();
+            batch.guild_motd_updated.push(ffi::EventGuildMotdState {
+                guild_id: state.guild_id,
+                message: state.message,
+                sender: state.sender,
+            });
+            push_ref(batch, ffi::SessionEventKind::GuildMotdUpdated, index);
+        }
         Event::GuildRankName {
             guild_id,
             rank_index,
@@ -2742,6 +2983,23 @@ fn translate_event(batch: &mut ffi::SessionDecodeBatch, event: seq_events::Event
                 rank_name,
             });
             push_ref(batch, ffi::SessionEventKind::GuildRankName, index);
+        }
+        Event::GuildRankNamesUpdated(state) => {
+            let index = batch.guild_rank_names_updated.len();
+            batch
+                .guild_rank_names_updated
+                .push(ffi::EventGuildRankNamesState {
+                    guild_id: state.guild_id,
+                    ranks: state
+                        .ranks
+                        .into_iter()
+                        .map(|rank| ffi::EventGuildRankNameEntry {
+                            rank_index: rank.rank_index,
+                            rank_name: rank.rank_name,
+                        })
+                        .collect(),
+                });
+            push_ref(batch, ffi::SessionEventKind::GuildRankNamesUpdated, index);
         }
         Event::LoadoutSwap {
             spawn_id,
@@ -3237,6 +3495,41 @@ fn translate_event(batch: &mut ffi::SessionDecodeBatch, event: seq_events::Event
             });
             push_ref(batch, ffi::SessionEventKind::Chat, index);
         }
+        Event::ChatMessage(message) => {
+            let index = batch.chat_message.len();
+            batch.chat_message.push(ffi::EventChatMessage {
+                kind: event_chat_message_kind(message.kind),
+                channel: message.channel,
+                from: message.from,
+                target: message.target,
+                text: message.text,
+                chat_color: message.chat_color,
+                channel_name: message.channel_name,
+                has_format_id: message.format_id.is_some(),
+                format_id: message.format_id.unwrap_or_default(),
+                args: message.args,
+            });
+            push_ref(batch, ffi::SessionEventKind::ChatMessage, index);
+        }
+        Event::UcsRecord {
+            channel_first,
+            channel_rest,
+            channel_run,
+            sender,
+            message,
+            spam,
+        } => {
+            let index = batch.ucs_record.len();
+            batch.ucs_record.push(ffi::EventUcsRecord {
+                channel_first,
+                channel_rest,
+                channel_run,
+                sender,
+                message,
+                spam,
+            });
+            push_ref(batch, ffi::SessionEventKind::UcsRecord, index);
+        }
         Event::BuffList { owner, entries } => {
             let index = batch.buff_list.len();
             batch.buff_list.push(ffi::EventBuffList {
@@ -3307,6 +3600,81 @@ fn translate_event(batch: &mut ffi::SessionDecodeBatch, event: seq_events::Event
             });
             push_ref(batch, ffi::SessionEventKind::GroupDisband, index);
         }
+        Event::GroupRosterWire {
+            group_id,
+            member_count,
+            names,
+            complete,
+        } => {
+            let index = batch.group_roster_wire.len();
+            batch.group_roster_wire.push(ffi::EventGroupRosterWire {
+                group_id,
+                member_count,
+                names,
+                complete,
+            });
+            push_ref(batch, ffi::SessionEventKind::GroupRosterWire, index);
+        }
+        Event::GroupRosterUpdated(state) => {
+            let index = batch.group_roster_updated.len();
+            batch.group_roster_updated.push(ffi::EventGroupRosterState {
+                has_group_id: state.group_id.is_some(),
+                group_id: state.group_id.unwrap_or_default(),
+                members: state.members.into_iter().map(event_group_member).collect(),
+                complete: state.complete,
+            });
+            push_ref(batch, ffi::SessionEventKind::GroupRosterUpdated, index);
+        }
+        Event::DynamicZoneInfo {
+            active,
+            max_players,
+            expedition_name,
+            leader_name,
+        } => {
+            let index = batch.dynamic_zone_info.len();
+            batch.dynamic_zone_info.push(ffi::EventDynamicZoneInfo {
+                active,
+                max_players,
+                expedition_name,
+                leader_name,
+            });
+            push_ref(batch, ffi::SessionEventKind::DynamicZoneInfo, index);
+        }
+        Event::DynamicZoneSwitch {
+            active,
+            zone_id,
+            instance_id,
+            kind,
+            position,
+        } => {
+            let index = batch.dynamic_zone_switch.len();
+            batch.dynamic_zone_switch.push(ffi::EventDynamicZoneSwitch {
+                active,
+                has_zone_id: zone_id.is_some(),
+                zone_id: zone_id.unwrap_or_default(),
+                has_instance_id: instance_id.is_some(),
+                instance_id: instance_id.unwrap_or_default(),
+                has_kind: kind.is_some(),
+                kind: kind.unwrap_or_default(),
+                has_position: position.is_some(),
+                position: position.map_or(
+                    ffi::EventPoint3 {
+                        x: 0.0,
+                        y: 0.0,
+                        z: 0.0,
+                    },
+                    event_point3,
+                ),
+            });
+            push_ref(batch, ffi::SessionEventKind::DynamicZoneSwitch, index);
+        }
+        Event::DynamicZoneUpdated(state) => {
+            let index = batch.dynamic_zone_updated.len();
+            batch
+                .dynamic_zone_updated
+                .push(event_dynamic_zone_state(state));
+            push_ref(batch, ffi::SessionEventKind::DynamicZoneUpdated, index);
+        }
         Event::LevelUpdate {
             level,
             level_old,
@@ -3366,6 +3734,9 @@ fn empty_session_batch(
         named: Vec::new(),
         inspect_answer: Vec::new(),
         guild_roster: Vec::new(),
+        guild_roster_updated: Vec::new(),
+        guild_roster_wire: Vec::new(),
+        guild_member_status: Vec::new(),
         zone_server_info: Vec::new(),
         item_set: Vec::new(),
         item_learned: Vec::new(),
@@ -3374,7 +3745,9 @@ fn empty_session_batch(
         equipment_snapshot: Vec::new(),
         equipment_slot_updated: Vec::new(),
         guild_motd: Vec::new(),
+        guild_motd_updated: Vec::new(),
         guild_rank_name: Vec::new(),
+        guild_rank_names_updated: Vec::new(),
         loadout_swap: Vec::new(),
         doors: Vec::new(),
         ground_item_removed: Vec::new(),
@@ -3413,6 +3786,8 @@ fn empty_session_batch(
         special_message: Vec::new(),
         loot_message: Vec::new(),
         chat: Vec::new(),
+        chat_message: Vec::new(),
+        ucs_record: Vec::new(),
         buff_list: Vec::new(),
         buff_wire: Vec::new(),
         buff_added: Vec::new(),
@@ -3420,6 +3795,11 @@ fn empty_session_batch(
         buff_removed: Vec::new(),
         group_follow: Vec::new(),
         group_disband: Vec::new(),
+        group_roster_wire: Vec::new(),
+        group_roster_updated: Vec::new(),
+        dynamic_zone_info: Vec::new(),
+        dynamic_zone_switch: Vec::new(),
+        dynamic_zone_updated: Vec::new(),
         level_update: Vec::new(),
         enter_world: Vec::new(),
         self_stats: Vec::new(),

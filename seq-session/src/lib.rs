@@ -18,9 +18,11 @@ use seq_backend_eql::{backend::EqlBackend, LootTracker, SelfTracker};
 use seq_backend_live::LiveBackend;
 use seq_events::{
     ActiveBuff, AlternateAbilityDefinition, AlternateAbilityRank, AlternateAdvancementProgress,
-    AlternateAdvancementSnapshot, Backend, CastInterruptionReason, Decoded, ExperienceProgress,
-    ItemTemplate, MoneyBalance, PlayerAppearance, PlayerIdentity, PlayerVitals, SessionResetReason,
-    SkillValue, VitalValue,
+    AlternateAdvancementSnapshot, Backend, CastInterruptionReason, ChatMessage, ChatMessageKind,
+    Decoded, DynamicZoneState, ExperienceProgress, GroupMember, GroupRosterState, GuildMotdState,
+    GuildRankNameEntry, GuildRankNamesState, GuildRosterMember, GuildRosterState, ItemTemplate,
+    MoneyBalance, PlayerAppearance, PlayerIdentity, PlayerVitals, SessionResetReason, SkillValue,
+    VitalValue,
 };
 #[cfg(feature = "backend-eql")]
 use seq_events::{CorpseLootSnapshot, LootAcquisition};
@@ -140,6 +142,39 @@ pub struct Session {
     player_identity: Option<PlayerIdentity>,
     progression: ProgressionState,
     combat: CombatState,
+    communication: CommunicationState,
+}
+
+const MAX_GROUP_PEERS: usize = 5;
+
+#[derive(Default)]
+struct CommunicationState {
+    group_id: Option<u32>,
+    group_slots: Vec<Option<GroupMember>>,
+    group_complete: bool,
+    guild_id: u32,
+    guild_members: Vec<GuildRosterMember>,
+    guild_complete: bool,
+    guild_status: BTreeMap<String, GuildMemberStatus>,
+    guild_rank_names: BTreeMap<u32, String>,
+    dynamic_zone: DynamicZoneCorrelation,
+    #[cfg(feature = "backend-eql")]
+    ucs_mask: Option<u8>,
+    #[cfg(feature = "backend-eql")]
+    ucs_known_channels: BTreeSet<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct GuildMemberStatus {
+    zone_id: u32,
+    last_on: u32,
+}
+
+#[derive(Default)]
+struct DynamicZoneCorrelation {
+    state: Option<DynamicZoneState>,
+    saw_info: bool,
+    saw_switch: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -305,6 +340,10 @@ impl Session {
             player_identity: None,
             progression: ProgressionState::default(),
             combat: CombatState::default(),
+            communication: CommunicationState {
+                group_slots: vec![None; MAX_GROUP_PEERS],
+                ..CommunicationState::default()
+            },
         }
     }
 
@@ -353,6 +392,73 @@ impl Session {
         let decoded =
             self.apply_session_semantics(decoded, opcode_name, direction, payload, timestamp);
         batch(generation, decoded)
+    }
+
+    /// Decode one raw UCS port-9877 payload through this session.
+    ///
+    /// UCS has no application opcode and does not use the world/zone catalog,
+    /// so hosts call this beside the numeric `decode` entry point. It does not
+    /// change remote SEQA framing. Only the EQL backend handles this stream.
+    pub fn decode_ucs(&mut self, direction: Direction, payload: &[u8]) -> DecodeBatch {
+        let generation = self.protocol_registry.snapshot(self.backend).generation();
+        if direction != Dir::ServerToClient {
+            return DecodeBatch {
+                protocol_generation: generation,
+                disposition: DecodeDisposition::Ignored,
+                events: Vec::new(),
+            };
+        }
+        if payload.len() < 12 {
+            return DecodeBatch {
+                protocol_generation: generation,
+                disposition: DecodeDisposition::Malformed,
+                events: Vec::new(),
+            };
+        }
+
+        #[cfg(feature = "backend-eql")]
+        if self.backend == BackendId::Eql {
+            for channel in seq_backend_eql::parse_ucs_channels(payload) {
+                self.communication.ucs_known_channels.insert(channel);
+            }
+            let records = seq_backend_eql::parse_ucs_chat(payload);
+            let mut events = Vec::with_capacity(records.len() * 2);
+            for record in records {
+                let compatibility = Event::UcsRecord {
+                    channel_first: record.channel_first,
+                    channel_rest: record.channel_rest.clone(),
+                    channel_run: record.channel_run.clone(),
+                    sender: record.sender.clone(),
+                    message: record.message.clone(),
+                    spam: record.spam,
+                };
+                let semantic = self.ucs_chat_message(
+                    record.channel_first,
+                    &record.channel_rest,
+                    &record.channel_run,
+                    record.sender,
+                    record.message,
+                    record.spam,
+                );
+                events.push(compatibility);
+                events.push(Event::ChatMessage(semantic));
+            }
+            return DecodeBatch {
+                protocol_generation: generation,
+                disposition: if events.is_empty() {
+                    DecodeDisposition::Ignored
+                } else {
+                    DecodeDisposition::Decoded
+                },
+                events,
+            };
+        }
+
+        DecodeBatch {
+            protocol_generation: generation,
+            disposition: DecodeDisposition::Unhandled,
+            events: Vec::new(),
+        }
     }
 
     /// Close stateful correlators at a lifecycle boundary.
@@ -450,15 +556,17 @@ impl Session {
                 for mut event in self.apply_progression_semantics(event) {
                     self.apply_entity_semantics(&mut event);
                     for event in self.apply_combat_semantics(event, direction) {
-                        let semantic_loot = self.decoder.observe_event(
-                            &event,
-                            opcode_name,
-                            direction,
-                            payload,
-                            timestamp,
-                        );
-                        output.push(event);
-                        output.extend(semantic_loot);
+                        for event in self.apply_communication_semantics(event) {
+                            let semantic_loot = self.decoder.observe_event(
+                                &event,
+                                opcode_name,
+                                direction,
+                                payload,
+                                timestamp,
+                            );
+                            output.push(event);
+                            output.extend(semantic_loot);
+                        }
                     }
                 }
             }
@@ -1467,6 +1575,543 @@ impl Session {
         }
     }
 
+    #[allow(clippy::too_many_lines)]
+    fn apply_communication_semantics(&mut self, event: Event) -> Vec<Event> {
+        match event {
+            Event::Chat {
+                channel,
+                from,
+                target,
+                text,
+                chat_color,
+                channel_name,
+            } => {
+                let compatibility = Event::Chat {
+                    channel,
+                    from: from.clone(),
+                    target: target.clone(),
+                    text: text.clone(),
+                    chat_color,
+                    channel_name: channel_name.clone(),
+                };
+                vec![
+                    compatibility,
+                    Event::ChatMessage(ChatMessage {
+                        kind: ChatMessageKind::Common,
+                        channel,
+                        from,
+                        target,
+                        text: clean_links(&text),
+                        chat_color,
+                        channel_name,
+                        format_id: None,
+                        args: Vec::new(),
+                    }),
+                ]
+            }
+            Event::SimpleMessage { format_id, color } => vec![
+                Event::SimpleMessage { format_id, color },
+                Event::ChatMessage(ChatMessage {
+                    kind: ChatMessageKind::Simple,
+                    channel: chat_color_channel(color),
+                    from: String::new(),
+                    target: String::new(),
+                    text: String::new(),
+                    chat_color: color,
+                    channel_name: String::new(),
+                    format_id: Some(format_id),
+                    args: Vec::new(),
+                }),
+            ],
+            Event::FormattedMessage {
+                format_id,
+                color,
+                args,
+            } => {
+                let channel = if self.backend == BackendId::Eql {
+                    19
+                } else {
+                    chat_color_channel(color)
+                };
+                vec![
+                    Event::FormattedMessage {
+                        format_id,
+                        color,
+                        args: args.clone(),
+                    },
+                    Event::ChatMessage(ChatMessage {
+                        kind: ChatMessageKind::Formatted,
+                        channel,
+                        from: String::new(),
+                        target: String::new(),
+                        text: String::new(),
+                        chat_color: color,
+                        channel_name: String::new(),
+                        format_id: Some(format_id),
+                        args,
+                    }),
+                ]
+            }
+            Event::SpecialMessage {
+                color,
+                target,
+                source,
+                message,
+            } => {
+                let target_name = self
+                    .entities
+                    .names_by_id
+                    .get(&target)
+                    .cloned()
+                    .unwrap_or_default();
+                vec![
+                    Event::SpecialMessage {
+                        color,
+                        target,
+                        source: source.clone(),
+                        message: message.clone(),
+                    },
+                    Event::ChatMessage(ChatMessage {
+                        kind: ChatMessageKind::Special,
+                        channel: chat_color_channel(color),
+                        from: source,
+                        target: target_name,
+                        text: clean_links(&message),
+                        chat_color: color,
+                        channel_name: String::new(),
+                        format_id: None,
+                        args: Vec::new(),
+                    }),
+                ]
+            }
+            Event::LootMessage {
+                color,
+                text,
+                item_id,
+                item_name,
+            } => {
+                let compatibility = Event::LootMessage {
+                    color,
+                    text: text.clone(),
+                    item_id,
+                    item_name,
+                };
+                if text.is_empty() {
+                    vec![compatibility]
+                } else {
+                    vec![
+                        compatibility,
+                        Event::ChatMessage(ChatMessage {
+                            kind: ChatMessageKind::Loot,
+                            channel: 19,
+                            from: String::new(),
+                            target: String::new(),
+                            text,
+                            chat_color: color,
+                            channel_name: String::new(),
+                            format_id: None,
+                            args: Vec::new(),
+                        }),
+                    ]
+                }
+            }
+            Event::GroupRosterWire {
+                group_id,
+                member_count,
+                names,
+                complete,
+            } => {
+                let compatibility = Event::GroupRosterWire {
+                    group_id,
+                    member_count,
+                    names: names.clone(),
+                    complete,
+                };
+                self.apply_group_roster(group_id, &names, complete);
+                vec![compatibility, Event::GroupRosterUpdated(self.group_state())]
+            }
+            Event::GroupFollow { name, level } => {
+                let compatibility = Event::GroupFollow {
+                    name: name.clone(),
+                    level,
+                };
+                if self.add_group_member(name, (level != 0).then_some(level)) {
+                    vec![compatibility, Event::GroupRosterUpdated(self.group_state())]
+                } else {
+                    vec![compatibility]
+                }
+            }
+            Event::GroupDisband {
+                yourname,
+                membername,
+            } => {
+                let compatibility = Event::GroupDisband {
+                    yourname,
+                    membername: membername.clone(),
+                };
+                if membername == self.player_name {
+                    self.communication.group_slots.fill(None);
+                    self.communication.group_complete = true;
+                } else {
+                    for slot in &mut self.communication.group_slots {
+                        if slot
+                            .as_ref()
+                            .is_some_and(|member| member.name == membername)
+                        {
+                            *slot = None;
+                        }
+                    }
+                }
+                vec![compatibility, Event::GroupRosterUpdated(self.group_state())]
+            }
+            Event::GuildRoster { guild_id, members } => {
+                vec![Event::GuildRoster { guild_id, members }]
+            }
+            Event::GuildRosterWire {
+                guild_id,
+                members,
+                complete,
+            } => {
+                let compatibility = Event::GuildRosterWire {
+                    guild_id,
+                    members: members.clone(),
+                    complete,
+                };
+                if self.communication.guild_id != guild_id {
+                    self.communication.guild_rank_names.clear();
+                    self.communication.guild_members.clear();
+                    self.communication.guild_complete = false;
+                }
+                self.communication.guild_id = guild_id;
+                if complete {
+                    self.communication.guild_members = members;
+                    self.communication.guild_complete = true;
+                } else {
+                    for member in members {
+                        if let Some(current) = self
+                            .communication
+                            .guild_members
+                            .iter_mut()
+                            .find(|current| current.name == member.name)
+                        {
+                            *current = member;
+                        } else {
+                            self.communication.guild_members.push(member);
+                        }
+                    }
+                }
+                for member in &mut self.communication.guild_members {
+                    if let Some(status) = self.communication.guild_status.get(&member.name) {
+                        member.zone_id = status.zone_id;
+                        member.last_on = status.last_on;
+                    }
+                }
+                vec![compatibility, Event::GuildRosterUpdated(self.guild_state())]
+            }
+            Event::GuildMemberStatus {
+                name,
+                zone_id,
+                instance_id,
+                last_on,
+            } => {
+                let compatibility = Event::GuildMemberStatus {
+                    name: name.clone(),
+                    zone_id,
+                    instance_id,
+                    last_on,
+                };
+                self.communication
+                    .guild_status
+                    .insert(name.clone(), GuildMemberStatus { zone_id, last_on });
+                if let Some(member) = self
+                    .communication
+                    .guild_members
+                    .iter_mut()
+                    .find(|member| member.name == name)
+                {
+                    member.zone_id = zone_id;
+                    member.last_on = last_on;
+                    vec![compatibility, Event::GuildRosterUpdated(self.guild_state())]
+                } else {
+                    self.communication.guild_complete = false;
+                    vec![compatibility]
+                }
+            }
+            Event::GuildMotd { message, sender } => vec![
+                Event::GuildMotd {
+                    message: message.clone(),
+                    sender: sender.clone(),
+                },
+                Event::GuildMotdUpdated(GuildMotdState {
+                    guild_id: self.communication.guild_id,
+                    message,
+                    sender,
+                }),
+            ],
+            Event::GuildRankName {
+                guild_id,
+                rank_index,
+                rank_name,
+            } => {
+                let compatibility = Event::GuildRankName {
+                    guild_id,
+                    rank_index,
+                    rank_name: rank_name.clone(),
+                };
+                if guild_id != 0 && self.communication.guild_id != guild_id {
+                    self.communication.guild_id = guild_id;
+                    self.communication.guild_rank_names.clear();
+                }
+                self.communication
+                    .guild_rank_names
+                    .insert(rank_index, rank_name);
+                vec![
+                    compatibility,
+                    Event::GuildRankNamesUpdated(self.guild_ranks()),
+                ]
+            }
+            Event::DynamicZoneInfo {
+                active,
+                max_players,
+                expedition_name,
+                leader_name,
+            } => {
+                let compatibility = Event::DynamicZoneInfo {
+                    active,
+                    max_players,
+                    expedition_name: expedition_name.clone(),
+                    leader_name: leader_name.clone(),
+                };
+                self.apply_dynamic_zone_info(active, max_players, expedition_name, leader_name);
+                vec![
+                    compatibility,
+                    Event::DynamicZoneUpdated(self.dynamic_zone_state()),
+                ]
+            }
+            Event::DynamicZoneSwitch {
+                active,
+                zone_id,
+                instance_id,
+                kind,
+                position,
+            } => {
+                let compatibility = Event::DynamicZoneSwitch {
+                    active,
+                    zone_id,
+                    instance_id,
+                    kind,
+                    position,
+                };
+                self.apply_dynamic_zone_switch(active, zone_id, instance_id, kind, position);
+                vec![
+                    compatibility,
+                    Event::DynamicZoneUpdated(self.dynamic_zone_state()),
+                ]
+            }
+            other => vec![other],
+        }
+    }
+
+    fn apply_group_roster(&mut self, group_id: u32, names: &[String], complete: bool) {
+        let mut incoming = Vec::new();
+        let mut seen = BTreeSet::new();
+        for name in names {
+            if name.is_empty() || name == &self.player_name || !seen.insert(name.clone()) {
+                continue;
+            }
+            incoming.push(name.clone());
+        }
+        if complete {
+            for slot in &mut self.communication.group_slots {
+                if slot
+                    .as_ref()
+                    .is_some_and(|member| !incoming.contains(&member.name))
+                {
+                    *slot = None;
+                }
+            }
+        }
+        for name in incoming {
+            self.add_group_member(name, None);
+        }
+        self.communication.group_id = nonzero(group_id);
+        self.communication.group_complete = complete && !self.player_name.is_empty();
+    }
+
+    fn add_group_member(&mut self, name: String, level: Option<u32>) -> bool {
+        if name.is_empty() || name == self.player_name {
+            return false;
+        }
+        if let Some(member) = self
+            .communication
+            .group_slots
+            .iter_mut()
+            .flatten()
+            .find(|member| member.name == name)
+        {
+            if level.is_some() && member.level != level {
+                member.level = level;
+                return true;
+            }
+            return false;
+        }
+        let Some((slot, target)) = self
+            .communication
+            .group_slots
+            .iter_mut()
+            .enumerate()
+            .find(|(_, member)| member.is_none())
+        else {
+            return false;
+        };
+        *target = Some(GroupMember {
+            slot: slot as u8,
+            name,
+            level,
+        });
+        true
+    }
+
+    fn group_state(&self) -> GroupRosterState {
+        GroupRosterState {
+            group_id: self.communication.group_id,
+            members: self
+                .communication
+                .group_slots
+                .iter()
+                .flatten()
+                .cloned()
+                .collect(),
+            complete: self.communication.group_complete,
+        }
+    }
+
+    fn guild_state(&self) -> GuildRosterState {
+        GuildRosterState {
+            guild_id: self.communication.guild_id,
+            members: self.communication.guild_members.clone(),
+            complete: self.communication.guild_complete,
+        }
+    }
+
+    fn guild_ranks(&self) -> GuildRankNamesState {
+        GuildRankNamesState {
+            guild_id: self.communication.guild_id,
+            ranks: self
+                .communication
+                .guild_rank_names
+                .iter()
+                .map(|(&rank_index, rank_name)| GuildRankNameEntry {
+                    rank_index,
+                    rank_name: rank_name.clone(),
+                })
+                .collect(),
+        }
+    }
+
+    fn apply_dynamic_zone_info(
+        &mut self,
+        active: bool,
+        max_players: u32,
+        expedition_name: String,
+        leader_name: String,
+    ) {
+        if !active {
+            self.communication.dynamic_zone = DynamicZoneCorrelation {
+                state: Some(inactive_dynamic_zone()),
+                saw_info: true,
+                saw_switch: true,
+            };
+            return;
+        }
+        let state = self
+            .communication
+            .dynamic_zone
+            .state
+            .get_or_insert_with(empty_active_dynamic_zone);
+        state.active = true;
+        state.max_players = Some(max_players);
+        state.expedition_name = expedition_name;
+        state.leader_name = leader_name;
+        self.communication.dynamic_zone.saw_info = true;
+        state.complete = self.communication.dynamic_zone.saw_switch;
+    }
+
+    fn apply_dynamic_zone_switch(
+        &mut self,
+        active: bool,
+        zone_id: Option<u16>,
+        instance_id: Option<u16>,
+        kind: Option<u32>,
+        position: Option<seq_events::Point3>,
+    ) {
+        if !active {
+            self.communication.dynamic_zone = DynamicZoneCorrelation {
+                state: Some(inactive_dynamic_zone()),
+                saw_info: true,
+                saw_switch: true,
+            };
+            return;
+        }
+        let state = self
+            .communication
+            .dynamic_zone
+            .state
+            .get_or_insert_with(empty_active_dynamic_zone);
+        state.active = true;
+        state.zone_id = zone_id;
+        state.instance_id = instance_id;
+        state.kind = kind;
+        state.position = position;
+        self.communication.dynamic_zone.saw_switch = true;
+        state.complete = self.communication.dynamic_zone.saw_info;
+    }
+
+    fn dynamic_zone_state(&self) -> DynamicZoneState {
+        self.communication
+            .dynamic_zone
+            .state
+            .clone()
+            .unwrap_or_else(inactive_dynamic_zone)
+    }
+
+    #[cfg(feature = "backend-eql")]
+    fn ucs_chat_message(
+        &mut self,
+        channel_first: u8,
+        channel_rest: &str,
+        channel_run: &str,
+        sender: String,
+        message: String,
+        spam: bool,
+    ) -> ChatMessage {
+        if channel_rest == "eneral" {
+            self.communication.ucs_mask = Some(channel_first ^ b'G');
+        }
+        let channel_name = resolve_ucs_channel(
+            channel_first,
+            channel_rest,
+            channel_run,
+            self.communication.ucs_mask,
+            &mut self.communication.ucs_known_channels,
+        );
+        ChatMessage {
+            kind: ChatMessageKind::Ucs,
+            channel: 19,
+            from: sender,
+            target: String::new(),
+            text: if spam {
+                format!("(SPAM) {message}")
+            } else {
+                message
+            },
+            chat_color: 0,
+            channel_name,
+            format_id: None,
+            args: Vec::new(),
+        }
+    }
+
     fn reset_combat(&mut self, reason: CastInterruptionReason) -> Vec<Event> {
         let mut events: Vec<_> = std::mem::take(&mut self.combat.casts)
             .into_values()
@@ -1482,6 +2127,7 @@ impl Session {
 
     fn reset_correlations(&mut self, cast_reason: CastInterruptionReason) -> Vec<Event> {
         let mut events = self.reset_combat(cast_reason);
+        events.extend(self.reset_communication());
         self.entities.clear();
         self.player_id = None;
         self.update_identity_id();
@@ -1501,6 +2147,154 @@ impl Session {
         events.extend(decoder_events);
         events
     }
+
+    fn reset_communication(&mut self) -> Vec<Event> {
+        let mut events = Vec::new();
+        if self.communication.group_id.is_some()
+            || self.communication.group_slots.iter().any(Option::is_some)
+        {
+            events.push(Event::GroupRosterUpdated(GroupRosterState {
+                group_id: None,
+                members: Vec::new(),
+                complete: false,
+            }));
+        }
+        if self.communication.guild_id != 0 || !self.communication.guild_members.is_empty() {
+            events.push(Event::GuildRosterUpdated(GuildRosterState {
+                guild_id: 0,
+                members: Vec::new(),
+                complete: false,
+            }));
+        }
+        if self
+            .communication
+            .dynamic_zone
+            .state
+            .as_ref()
+            .is_some_and(|state| state.active)
+        {
+            events.push(Event::DynamicZoneUpdated(inactive_dynamic_zone()));
+        }
+        self.communication = CommunicationState {
+            group_slots: vec![None; MAX_GROUP_PEERS],
+            ..CommunicationState::default()
+        };
+        events
+    }
+}
+
+const fn empty_active_dynamic_zone() -> DynamicZoneState {
+    DynamicZoneState {
+        active: true,
+        zone_id: None,
+        instance_id: None,
+        kind: None,
+        position: None,
+        max_players: None,
+        expedition_name: String::new(),
+        leader_name: String::new(),
+        complete: false,
+    }
+}
+
+const fn inactive_dynamic_zone() -> DynamicZoneState {
+    DynamicZoneState {
+        active: false,
+        zone_id: None,
+        instance_id: None,
+        kind: None,
+        position: None,
+        max_players: None,
+        expedition_name: String::new(),
+        leader_name: String::new(),
+        complete: true,
+    }
+}
+
+fn chat_color_channel(color: u32) -> u32 {
+    match color {
+        256 | 307 => 8,
+        257 | 308 => 7,
+        258 | 309 => 2,
+        259 | 310 => 0,
+        260 | 311 => 5,
+        261 | 312 => 4,
+        262 | 313 => 3,
+        263 | 314 => 24,
+        327 => 15,
+        264 | 284 | 288 | 289 | 302 => 26,
+        285 => 22,
+        287 => 23,
+        _ => 19,
+    }
+}
+
+fn clean_links(text: &str) -> String {
+    const ITEM_LINK_HEX: usize = 197;
+    let mut output = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(open) = rest.find('\u{12}') {
+        output.push_str(&rest[..open]);
+        let body = &rest[open + 1..];
+        let Some(close) = body.find('\u{12}') else {
+            output.push_str(body);
+            return output;
+        };
+        let link = &body[..close];
+        if let Some(caret) = link.rfind('^') {
+            output.push_str(link[caret + 1..].trim_start_matches('\''));
+        } else {
+            output.push_str(link.get(ITEM_LINK_HEX..).unwrap_or_default());
+        }
+        rest = &body[close + 1..];
+    }
+    output.push_str(rest);
+    output
+}
+
+#[cfg(feature = "backend-eql")]
+fn resolve_ucs_channel(
+    first: u8,
+    rest: &str,
+    run: &str,
+    mask: Option<u8>,
+    known: &mut BTreeSet<String>,
+) -> String {
+    if let Some(name) = known
+        .iter()
+        .filter_map(|name| {
+            let suffix = shared_suffix_len(run.as_bytes(), name.as_bytes());
+            (suffix >= 5).then_some((suffix, name))
+        })
+        .max_by_key(|(suffix, _)| *suffix)
+        .map(|(_, name)| name.clone())
+    {
+        return name;
+    }
+
+    let dominant = run == rest || (run.len() == rest.len() + 1 && run.get(1..) == Some(rest));
+    if !dominant {
+        return run.to_owned();
+    }
+    let name = match mask.map(|mask| first ^ mask) {
+        Some(repaired) if repaired.is_ascii_graphic() => {
+            format!("{}{rest}", char::from(repaired))
+        }
+        _ => rest.to_owned(),
+    };
+    if name.len() >= 2 && name.as_bytes()[0].is_ascii_uppercase() {
+        known.insert(name.clone());
+    }
+    name
+}
+
+#[cfg(feature = "backend-eql")]
+fn shared_suffix_len(left: &[u8], right: &[u8]) -> usize {
+    left.iter()
+        .rev()
+        .zip(right.iter().rev())
+        .take_while(|(left, right)| left == right)
+        .count()
 }
 
 fn inventory_key(item: &ItemTemplate) -> String {

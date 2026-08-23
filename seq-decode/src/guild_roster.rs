@@ -49,6 +49,10 @@ pub struct GuildRoster {
     /// entry for this guild).
     pub guild_id: u32,
     pub members: Vec<GuildMemberRow>,
+    /// False when the parser reached a truncated trailing member. The complete
+    /// prefix remains useful to a stateful session, but must not replace a
+    /// previously complete roster.
+    pub complete: bool,
 }
 
 #[derive(Debug, Error, PartialEq, Eq)]
@@ -104,13 +108,21 @@ pub fn parse_guild_member_list(bytes: &[u8]) -> Result<GuildRoster, GuildRosterE
     // have, rather than failing the whole roster.
     let mut members = Vec::with_capacity(count.min(4096));
     while !c.at_end() {
-        match read_member(&mut c) {
-            Ok(m) => members.push(m),
+        let mut trial = c;
+        match read_member(&mut trial) {
+            Ok(m) => {
+                c = trial;
+                members.push(m);
+            }
             Err(_) => break,
         }
     }
 
-    Ok(GuildRoster { guild_id, members })
+    Ok(GuildRoster {
+        guild_id,
+        members,
+        complete: c.at_end(),
+    })
 }
 
 #[cfg(test)]
@@ -163,6 +175,17 @@ mod tests {
         assert!(r.members[0].full_member);
         assert_eq!(r.members[1].primary_class, 3);
         assert_eq!(r.members[1].public_note, "alt of Aaaa");
+        assert!(r.complete);
+    }
+
+    #[test]
+    fn truncated_tail_keeps_a_partial_prefix() {
+        let mut b = roster(&[("Aaaa", 60, 1, 2, ""), ("Bbbbbb", 55, 3, 0, "alt")]);
+        b.truncate(b.len() - 5);
+        let r = parse_guild_member_list(&b).unwrap();
+        assert_eq!(r.members.len(), 1);
+        assert_eq!(r.members[0].name, "Aaaa");
+        assert!(!r.complete);
     }
 
     #[test]
