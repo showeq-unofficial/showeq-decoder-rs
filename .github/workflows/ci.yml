@@ -87,7 +87,9 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - name: check generated manifest, bridge mapping, and source inventory
-        run: python3 tools/event_coverage.py check
+        run: |
+          python3 tools/event_coverage.py check
+          python3 -B -m unittest discover -s tools -p 'test_event_coverage.py'
 
   eql-isolation:
     name: eql links no Live decoder

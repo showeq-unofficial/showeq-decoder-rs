@@ -22,6 +22,7 @@ fi
 
 echo "pre-push: Event manifest, bridge mapping, and phase 11 source inventory..."
 python3 tools/event_coverage.py check
+python3 -B -m unittest discover -s tools -p 'test_event_coverage.py'
 
 # Testing all three backends is the point. `cargo test --workspace` builds every
 # crate with its DEFAULT features, so seq-decode is only ever compiled against

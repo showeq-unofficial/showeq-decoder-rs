@@ -358,6 +358,20 @@
       ]
     }
   ],
+  "legacy_bridge_packet_support_entrypoints": [
+    {
+      "name": "struct_size_overrides",
+      "declaration": "seq-bridge/src/lib.rs",
+      "line": 1951,
+      "purpose": "Backend-specific payload-size gates in the C++ host."
+    },
+    {
+      "name": "door_stride",
+      "declaration": "seq-bridge/src/lib.rs",
+      "line": 1958,
+      "purpose": "Backend-specific OP_SpawnDoor row stride in the C++ host."
+    }
+  ],
   "backend_decoder_and_support_modules": [
     {
       "backend": "eql",

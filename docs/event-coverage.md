@@ -62,10 +62,11 @@ python3 path/to/scry-decoder-rs/tools/event_coverage.py \
 ```
 
 At phase 11 deletion time, add `--strict`. Strict mode rejects every `legacy`
-and `missing` value. It also requires at least one Rust-owned path for every
-host-visible event, so marking all three paths `not_applicable` cannot hide a
-coverage gap. Both hosts must pass strict mode, their capture corpus, and their
-protobuf projection tests before deleting any source listed in the inventory.
+and `missing` value. It also requires a Rust-owned projection for every
+host-visible event. Only variants documented as internal-only in the Event
+manifest may omit projection, so `not_applicable` cannot hide a host projection
+gap. Both hosts must pass strict mode, their capture corpus, and their protobuf
+projection tests before deleting any source listed in the inventory.
 
 ## Reading the deletion inventory
 
@@ -76,6 +77,8 @@ is safe to delete. For example:
 jq '.legacy_bridge_decoder_entrypoints[].name' \
   docs/phase11-source-inventory.json
 jq '.standalone_bridge_trackers[]' \
+  docs/phase11-source-inventory.json
+jq '.legacy_bridge_packet_support_entrypoints[]' \
   docs/phase11-source-inventory.json
 ```
 

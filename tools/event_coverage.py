@@ -35,6 +35,19 @@ FAMILIES = {
     "communication_social",
 }
 HOST_STATUSES = {"rust", "legacy", "not_applicable", "missing"}
+SESSION_BRIDGE_FUNCTIONS = {
+    "session_protocol_registry_new",
+    "reload",
+    "content_hash",
+    "session_new",
+    "decode",
+    "decode_ucs",
+    "flush",
+}
+PACKET_SUPPORT_FUNCTIONS = {
+    "struct_size_overrides": "Backend-specific payload-size gates in the C++ host.",
+    "door_stride": "Backend-specific OP_SpawnDoor row stride in the C++ host.",
+}
 
 
 class CoverageError(RuntimeError):
@@ -293,6 +306,38 @@ def inventory_data() -> dict[str, object]:
             }
         )
 
+    all_functions = Counter(
+        re.findall(r"\bfn\s+([a-z][a-z0-9_]*)\s*\(", extern_body)
+    )
+    classified_functions = Counter(SESSION_BRIDGE_FUNCTIONS)
+    classified_functions.update(decoder_names)
+    for tracker in trackers:
+        classified_functions.update(tracker["methods"])
+    classified_functions.update(PACKET_SUPPORT_FUNCTIONS.keys())
+    if all_functions != classified_functions:
+        missing = sorted((all_functions - classified_functions).elements())
+        stale = sorted((classified_functions - all_functions).elements())
+        parts = []
+        if missing:
+            parts.append("unclassified extern functions: " + ", ".join(missing))
+        if stale:
+            parts.append("stale function classifications: " + ", ".join(stale))
+        raise CoverageError("bridge deletion inventory is incomplete: " + "; ".join(parts))
+
+    packet_support = []
+    for name, purpose in PACKET_SUPPORT_FUNCTIONS.items():
+        match = re.search(rf"\bfn\s+{name}\s*\(", bridge_masked)
+        if match is None:
+            raise CoverageError(f"missing packet-support bridge declaration {name}")
+        packet_support.append(
+            {
+                "name": name,
+                "declaration": "seq-bridge/src/lib.rs",
+                "line": line_number(bridge, match.start()),
+                "purpose": purpose,
+            }
+        )
+
     modules = []
     for crate, backend in (
         ("seq-decode", "live_test"),
@@ -315,6 +360,7 @@ def inventory_data() -> dict[str, object]:
         "purpose": "Phase 11 deletion inventory. Presence does not authorize deletion before host parity.",
         "legacy_bridge_decoder_entrypoints": entrypoints,
         "standalone_bridge_trackers": trackers,
+        "legacy_bridge_packet_support_entrypoints": packet_support,
         "backend_decoder_and_support_modules": modules,
     }
 
@@ -392,7 +438,11 @@ def check_host(path: Path, strict: bool) -> None:
             )
         if strict and any(status in {"legacy", "missing"} for status in statuses):
             unfinished.add(name)
-        if strict and not expected[name]["internal_only"] and "rust" not in statuses:
+        if (
+            strict
+            and not expected[name]["internal_only"]
+            and row.get("projection") != "rust"
+        ):
             unfinished.add(name)
     missing = [name for name in expected if name not in seen]
     if missing:
