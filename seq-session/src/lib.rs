@@ -17,11 +17,12 @@ use seq_backend_eql::{backend::EqlBackend, LootTracker, SelfTracker};
 #[cfg(any(feature = "backend-live", feature = "backend-test"))]
 use seq_backend_live::LiveBackend;
 use seq_events::{
-    Backend, Decoded, PlayerAppearance, PlayerIdentity, PlayerVitals, SessionResetReason,
-    VitalValue,
+    AlternateAbilityDefinition, AlternateAbilityRank, AlternateAdvancementProgress,
+    AlternateAdvancementSnapshot, Backend, Decoded, ExperienceProgress, ItemTemplate, MoneyBalance,
+    PlayerAppearance, PlayerIdentity, PlayerVitals, SessionResetReason, SkillValue, VitalValue,
 };
 use std::{
-    collections::{BTreeSet, HashMap},
+    collections::{BTreeMap, BTreeSet, HashMap},
     sync::Arc,
 };
 
@@ -133,6 +134,19 @@ pub struct Session {
     player_name: String,
     player_id: Option<u32>,
     player_identity: Option<PlayerIdentity>,
+    progression: ProgressionState,
+}
+
+#[derive(Default)]
+struct ProgressionState {
+    inventory: HashMap<String, ItemTemplate>,
+    equipment: BTreeMap<u16, String>,
+    money: Option<MoneyBalance>,
+    skills: BTreeMap<u32, u32>,
+    experience: Option<u32>,
+    level: Option<u32>,
+    aa_progress: Option<AlternateAdvancementProgress>,
+    aa_definitions: HashMap<u32, u32>,
 }
 
 #[derive(Default)]
@@ -263,6 +277,7 @@ impl Session {
             player_name: String::new(),
             player_id: None,
             player_identity: None,
+            progression: ProgressionState::default(),
         }
     }
 
@@ -396,11 +411,13 @@ impl Session {
                 output.push(Event::SessionReset { reason });
             }
 
-            for mut event in self.apply_player_semantics(event, opcode_name, direction) {
-                self.apply_entity_semantics(&mut event);
-                self.decoder
-                    .observe_event(&event, opcode_name, direction, payload, timestamp);
-                output.push(event);
+            for event in self.apply_player_semantics(event, opcode_name, direction) {
+                for mut event in self.apply_progression_semantics(event) {
+                    self.apply_entity_semantics(&mut event);
+                    self.decoder
+                        .observe_event(&event, opcode_name, direction, payload, timestamp);
+                    output.push(event);
+                }
             }
         }
         Decoded::Many(output)
@@ -812,10 +829,207 @@ impl Session {
         }
     }
 
+    #[allow(clippy::too_many_lines)]
+    fn apply_progression_semantics(&mut self, event: Event) -> Vec<Event> {
+        match event {
+            Event::PlayerProfile(profile) => {
+                self.progression.level = Some(u32::from(profile.level));
+                let money = MoneyBalance {
+                    platinum: profile.platinum,
+                    gold: profile.gold,
+                    silver: profile.silver,
+                    copper: profile.copper,
+                };
+                self.progression.money = Some(money);
+
+                self.progression.skills = learned_skills(&profile.skills);
+                let skills = self
+                    .progression
+                    .skills
+                    .iter()
+                    .map(|(&skill_id, &value)| SkillValue { skill_id, value })
+                    .collect();
+
+                let aa_progress = AlternateAdvancementProgress {
+                    experience: profile.aa_experience,
+                    unspent_points: profile.aa_unspent,
+                };
+                self.progression.aa_progress = Some(aa_progress);
+                let aa = AlternateAdvancementSnapshot {
+                    purchased: purchased_aa(&profile.aa_ids, &profile.aa_values),
+                    spent_points: (self.backend != BackendId::Eql).then_some(profile.aa_spent),
+                    assigned_points: (self.backend != BackendId::Eql)
+                        .then_some(profile.aa_assigned),
+                    unspent_points: profile.aa_unspent,
+                    experience: profile.aa_experience,
+                };
+
+                vec![
+                    Event::PlayerProfile(profile),
+                    Event::MoneyBalanceUpdated(money),
+                    Event::SkillsSnapshot { skills },
+                    Event::AlternateAdvancementSnapshot(aa),
+                ]
+            }
+            Event::ItemSet { items } => {
+                let canonical = canonical_inventory(items.clone());
+                let inventory = inventory_map(&canonical);
+                let equipment = equipment_map(&canonical);
+                let changed = inventory != self.progression.inventory;
+                self.progression.inventory = inventory;
+                self.progression.equipment = equipment;
+
+                let mut output = vec![Event::ItemSet { items }];
+                if changed {
+                    let worn = equipment_items(&canonical);
+                    output.push(Event::InventorySnapshot { items: canonical });
+                    output.push(Event::EquipmentSnapshot { items: worn });
+                }
+                output
+            }
+            Event::ItemLearned { item } => self.apply_item_update(item),
+            Event::Money {
+                platinum,
+                gold,
+                silver,
+                copper,
+            } => {
+                let balance = MoneyBalance {
+                    platinum,
+                    gold,
+                    silver,
+                    copper,
+                };
+                let mut output = vec![Event::Money {
+                    platinum,
+                    gold,
+                    silver,
+                    copper,
+                }];
+                if self.progression.money != Some(balance) {
+                    self.progression.money = Some(balance);
+                    output.push(Event::MoneyBalanceUpdated(balance));
+                }
+                output
+            }
+            Event::SkillUpdate { skill_id, value } => {
+                let mut output = vec![Event::SkillUpdate { skill_id, value }];
+                if self.progression.skills.get(&skill_id).copied() != Some(value) {
+                    self.progression.skills.insert(skill_id, value);
+                    output.push(Event::SkillValueUpdated(SkillValue { skill_id, value }));
+                }
+                output
+            }
+            Event::Exp { exp } => {
+                let mut output = vec![Event::Exp { exp }];
+                if self.progression.experience != Some(exp) {
+                    self.progression.experience = Some(exp);
+                    output.push(Event::ExperienceUpdated(ExperienceProgress {
+                        experience: exp,
+                        level: self.progression.level,
+                        previous_level: None,
+                    }));
+                }
+                output
+            }
+            Event::LevelUpdate {
+                level,
+                level_old,
+                exp,
+            } => {
+                let mut output = vec![Event::LevelUpdate {
+                    level,
+                    level_old,
+                    exp,
+                }];
+                let changed = self.progression.level != Some(level)
+                    || self.progression.experience != Some(exp);
+                self.progression.level = Some(level);
+                self.progression.experience = Some(exp);
+                if let Some(identity) = &mut self.player_identity {
+                    if identity.level != level {
+                        identity.level = level;
+                        output.push(Event::PlayerIdentityUpdated(identity.clone()));
+                    }
+                }
+                if changed {
+                    output.push(Event::ExperienceUpdated(ExperienceProgress {
+                        experience: exp,
+                        level: Some(level),
+                        previous_level: Some(level_old),
+                    }));
+                }
+                output
+            }
+            Event::AaExp { alt_exp, aa_points } => {
+                let progress = AlternateAdvancementProgress {
+                    experience: alt_exp,
+                    unspent_points: aa_points,
+                };
+                let mut output = vec![Event::AaExp { alt_exp, aa_points }];
+                if self.progression.aa_progress != Some(progress) {
+                    self.progression.aa_progress = Some(progress);
+                    output.push(Event::AlternateAdvancementUpdated(progress));
+                }
+                output
+            }
+            Event::AaTable { desc_id, title_sid } => {
+                let mut output = vec![Event::AaTable { desc_id, title_sid }];
+                if self.progression.aa_definitions.get(&desc_id).copied() != Some(title_sid) {
+                    self.progression.aa_definitions.insert(desc_id, title_sid);
+                    output.push(Event::AlternateAbilityDefined(AlternateAbilityDefinition {
+                        ability_id: desc_id,
+                        title_string_id: title_sid,
+                    }));
+                }
+                output
+            }
+            other => vec![other],
+        }
+    }
+
+    fn apply_item_update(&mut self, item: ItemTemplate) -> Vec<Event> {
+        let key = inventory_key(&item);
+        let previous = self.progression.inventory.get(&key).cloned();
+        let mut output = vec![Event::ItemLearned { item: item.clone() }];
+        if previous.as_ref() == Some(&item) {
+            return output;
+        }
+
+        let previous_location = previous.as_ref().map(ItemTemplate::location);
+        let old_worn = previous.as_ref().and_then(|old| {
+            old.is_worn()
+                .then_some((old.container_slot, inventory_key(old)))
+        });
+        self.progression.inventory.insert(key.clone(), item.clone());
+        output.push(Event::InventoryItemUpdated {
+            item: item.clone(),
+            previous_location,
+        });
+
+        if let Some((slot, old_key)) = old_worn {
+            if (!item.is_worn() || item.container_slot != slot)
+                && self.progression.equipment.get(&slot) == Some(&old_key)
+            {
+                self.progression.equipment.remove(&slot);
+                output.push(Event::EquipmentSlotUpdated { slot, item: None });
+            }
+        }
+        if item.is_worn() {
+            self.progression.equipment.insert(item.container_slot, key);
+            output.push(Event::EquipmentSlotUpdated {
+                slot: item.container_slot,
+                item: Some(item),
+            });
+        }
+        output
+    }
+
     fn reset_correlations(&mut self) {
         self.entities.clear();
         self.player_id = None;
         self.update_identity_id();
+        self.progression = ProgressionState::default();
         match &mut self.decoder {
             #[cfg(feature = "backend-eql")]
             BackendSession::Eql(state) => {
@@ -828,6 +1042,87 @@ impl Session {
             BackendSession::Live(_) | BackendSession::Test(_) => {}
         }
     }
+}
+
+fn inventory_key(item: &ItemTemplate) -> String {
+    if item.serial.is_empty() {
+        format!(
+            "\0{}:{}:{}:{}",
+            item.item_id, item.container_id, item.container_slot, item.parent_slot
+        )
+    } else {
+        item.serial.clone()
+    }
+}
+
+fn canonical_inventory(items: Vec<ItemTemplate>) -> Vec<ItemTemplate> {
+    let mut by_key = HashMap::with_capacity(items.len());
+    for item in items {
+        by_key.insert(inventory_key(&item), item);
+    }
+    let mut items: Vec<_> = by_key.into_values().collect();
+    items.sort_by(|left, right| {
+        (
+            left.container_id,
+            left.parent_slot,
+            left.container_slot,
+            &left.serial,
+        )
+            .cmp(&(
+                right.container_id,
+                right.parent_slot,
+                right.container_slot,
+                &right.serial,
+            ))
+    });
+    items
+}
+
+fn inventory_map(items: &[ItemTemplate]) -> HashMap<String, ItemTemplate> {
+    items
+        .iter()
+        .cloned()
+        .map(|item| (inventory_key(&item), item))
+        .collect()
+}
+
+fn equipment_map(items: &[ItemTemplate]) -> BTreeMap<u16, String> {
+    items
+        .iter()
+        .filter(|item| item.is_worn())
+        .map(|item| (item.container_slot, inventory_key(item)))
+        .collect()
+}
+
+fn equipment_items(items: &[ItemTemplate]) -> Vec<ItemTemplate> {
+    let by_key = inventory_map(items);
+    equipment_map(items)
+        .into_values()
+        .filter_map(|key| by_key.get(&key).cloned())
+        .collect()
+}
+
+fn learned_skills(values: &[u32]) -> BTreeMap<u32, u32> {
+    values
+        .iter()
+        .copied()
+        .enumerate()
+        .filter(|(_, value)| *value != 0 && *value != u32::MAX)
+        .map(|(skill_id, value)| (skill_id as u32, value))
+        .collect()
+}
+
+fn purchased_aa(ids: &[u32], ranks: &[u32]) -> Vec<AlternateAbilityRank> {
+    let mut purchased = BTreeMap::new();
+    for (&ability_id, &rank) in ids.iter().zip(ranks) {
+        if ability_id != 0 && rank != 0 {
+            purchased.insert(ability_id, rank);
+        }
+    }
+    purchased
+        .into_iter()
+        .map(|(ability_id, rank)| AlternateAbilityRank { ability_id, rank })
+        .collect()
 }
 
 #[cfg(feature = "backend-eql")]
@@ -960,6 +1255,9 @@ mod tests {
             aa_ids: Vec::new(),
             aa_values: Vec::new(),
             aa_spent: 0,
+            aa_assigned: 0,
+            aa_unspent: 0,
+            aa_experience: 0,
             skills: Vec::new(),
             class_mask: 0,
             str_: 0,
@@ -1101,6 +1399,20 @@ mod tests {
                     reason: SessionResetReason::PlayerProfile,
                 },
                 Event::PlayerProfile(profile.clone()),
+                Event::MoneyBalanceUpdated(MoneyBalance {
+                    platinum: 0,
+                    gold: 0,
+                    silver: 0,
+                    copper: 0,
+                }),
+                Event::SkillsSnapshot { skills: Vec::new() },
+                Event::AlternateAdvancementSnapshot(AlternateAdvancementSnapshot {
+                    purchased: Vec::new(),
+                    spent_points: None,
+                    assigned_points: None,
+                    unspent_points: 0,
+                    experience: 0,
+                }),
                 Event::PlayerIdentityUpdated(PlayerIdentity {
                     spawn_id: None,
                     name: "Firona".into(),
@@ -1125,6 +1437,59 @@ mod tests {
             ])
         );
         assert_eq!(session.self_identity(), SelfIdentity::default());
+    }
+
+    #[test]
+    fn profile_progression_snapshot_pairs_and_filters_wire_arrays() {
+        let registry = Arc::new(ProtocolRegistry::embedded().unwrap());
+        let mut session = eql_session(registry);
+        let mut profile = profile("Firona");
+        profile.aa_ids = vec![700, 0, 701, 700];
+        profile.aa_values = vec![2, 9, 0, 3];
+        profile.aa_spent = 99;
+        profile.aa_assigned = 88;
+        profile.aa_unspent = 7;
+        profile.aa_experience = 6_543;
+        profile.skills = vec![0, 12, u32::MAX, 34];
+        profile.platinum = 11;
+        profile.gold = 22;
+        profile.silver = 33;
+        profile.copper = 44;
+
+        assert_eq!(
+            session.apply_progression_semantics(Event::PlayerProfile(profile.clone())),
+            vec![
+                Event::PlayerProfile(profile),
+                Event::MoneyBalanceUpdated(MoneyBalance {
+                    platinum: 11,
+                    gold: 22,
+                    silver: 33,
+                    copper: 44,
+                }),
+                Event::SkillsSnapshot {
+                    skills: vec![
+                        SkillValue {
+                            skill_id: 1,
+                            value: 12,
+                        },
+                        SkillValue {
+                            skill_id: 3,
+                            value: 34,
+                        },
+                    ],
+                },
+                Event::AlternateAdvancementSnapshot(AlternateAdvancementSnapshot {
+                    purchased: vec![AlternateAbilityRank {
+                        ability_id: 700,
+                        rank: 3,
+                    }],
+                    spent_points: None,
+                    assigned_points: None,
+                    unspent_points: 7,
+                    experience: 6_543,
+                }),
+            ]
+        );
     }
 
     #[test]

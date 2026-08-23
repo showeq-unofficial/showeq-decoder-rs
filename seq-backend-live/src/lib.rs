@@ -374,6 +374,9 @@ fn player_profile(bytes: &[u8]) -> Decoded {
             aa_ids: p.aa_ids,
             aa_values: p.aa_values,
             aa_spent: p.aa_spent,
+            aa_assigned: p.aa_assigned,
+            aa_unspent: p.aa_unspent,
+            aa_experience: p.exp_aa,
             skills: p.skills,
             class_mask: p.class_mask,
             str_: p.str_,
@@ -439,7 +442,11 @@ fn item_packet(bytes: &[u8]) -> Decoded {
                 name: i.name,
                 lore_name: i.lore_name,
                 item_id: i.item_id,
-                icon: 0, // Live's wrapper carries no icon id.
+                icon: None,
+                stack_count: Some(i.stack_count),
+                weight_tenths: Some(i.weight_tenths),
+                flags: Some(i.flags),
+                corruption: Some(i.corruption),
                 slot_mask: i.slot_mask,
                 // Live addresses possessions only; its mainSlot/subSlot map
                 // onto the neutral pair, with mainSlot 0 meaning "not in a bag"

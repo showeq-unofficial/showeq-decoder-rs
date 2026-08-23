@@ -155,6 +155,13 @@ pub struct ProfileInfo {
     pub aa_values: Vec<u32>,
     /// Total AA points spent (the profile's `aa_spent`).
     pub aa_spent: u32,
+    /// AA points assigned to abilities. This can differ from `aa_spent` on
+    /// Live because spent points also include consumable abilities.
+    pub aa_assigned: u32,
+    /// AA points ready for the player to spend.
+    pub aa_unspent: u32,
+    /// Progress toward the next AA point, on the 0..100000 wire scale.
+    pub aa_experience: u32,
     /// Learned-skill values, indexed by skill id (eql fills this; Live surfaces
     /// skills by another path, so it's empty there). `0xFFFFFFFF` = the skill is
     /// unavailable to this class; the consumer filters those (and 0) out.
@@ -266,7 +273,20 @@ pub struct ItemTemplate {
     /// Usually equal to `name`; a CONTAINER carries its description here.
     pub lore_name: String,
     pub item_id: u32,
-    pub icon: u32,
+    /// Drag-item atlas id. EQL carries it; the current Live item wrapper does
+    /// not, so absence must not turn into a real icon id of zero.
+    pub icon: Option<u32>,
+    /// Stack size or remaining charges. Present on Live's wrapper and absent
+    /// from the validated EQL bulk records.
+    pub stack_count: Option<u32>,
+    /// Item weight in tenths of a unit. Keeping the integer wire value avoids
+    /// float equality and preserves the exact value through adapters.
+    pub weight_tenths: Option<u32>,
+    /// Live's decoded flag word. EQL has no validated equivalent yet.
+    pub flags: Option<u32>,
+    /// Live's corruption resist. EQL's five decoded resist slots do not expose
+    /// a sixth value, so this remains absent there.
+    pub corruption: Option<i32>,
     /// Standard EQ slot bitmask; 0 = not equippable. This is where the item
     /// COULD go — see `container_id` for where it IS.
     pub slot_mask: u32,
@@ -292,6 +312,83 @@ pub struct ItemTemplate {
     pub mana: i32,
     pub endurance: i32,
     pub ac: i32,
+}
+
+/// A normalized item location. It is copied out separately on move events so
+/// a reducer can vacate the old equipment slot before applying the new item.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ItemLocation {
+    pub container_id: u32,
+    pub container_slot: u16,
+    pub parent_slot: u16,
+}
+
+impl ItemTemplate {
+    pub const fn location(&self) -> ItemLocation {
+        ItemLocation {
+            container_id: self.container_id,
+            container_slot: self.container_slot,
+            parent_slot: self.parent_slot,
+        }
+    }
+}
+
+/// The carried purse without any host-specific total or display formatting.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MoneyBalance {
+    pub platinum: u32,
+    pub gold: u32,
+    pub silver: u32,
+    pub copper: u32,
+}
+
+/// One learned skill and its absolute value.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SkillValue {
+    pub skill_id: u32,
+    pub value: u32,
+}
+
+/// The regular per-level experience bar and the level it belongs to when the
+/// ordered session knows it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ExperienceProgress {
+    pub experience: u32,
+    pub level: Option<u32>,
+    /// Present only when the same packet reports a level transition.
+    pub previous_level: Option<u32>,
+}
+
+/// One purchased alternate-advancement ability and its absolute rank.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AlternateAbilityRank {
+    pub ability_id: u32,
+    pub rank: u32,
+}
+
+/// Player AA state from an authoritative profile snapshot.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AlternateAdvancementSnapshot {
+    pub purchased: Vec<AlternateAbilityRank>,
+    /// EQL does not carry these two counters independently.
+    pub spent_points: Option<u32>,
+    pub assigned_points: Option<u32>,
+    pub unspent_points: u32,
+    pub experience: u32,
+}
+
+/// Incremental AA bar and unspent-point state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AlternateAdvancementProgress {
+    pub experience: u32,
+    pub unspent_points: u32,
+}
+
+/// One mapping from an AA rank id to its localized title string id.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AlternateAbilityDefinition {
+    pub ability_id: u32,
+    pub title_string_id: u32,
 }
 
 impl ItemTemplate {
@@ -566,6 +663,26 @@ pub enum Event {
     /// fires on each slot move and zone-in pickup). The consumer ACCUMULATES
     /// these — unlike [`Event::ItemSet`], which replaces the whole set.
     ItemLearned { item: ItemTemplate },
+    /// Final authoritative inventory snapshot. The ordered session removes
+    /// duplicate serials before emitting it. An empty snapshot is never
+    /// synthesized from a malformed or request-side packet.
+    InventorySnapshot { items: Vec<ItemTemplate> },
+    /// One changed inventory instance. `previous_location` is present when the
+    /// session already knew the serial, including moves between inventory and
+    /// worn slots. Byte-for-byte duplicate updates do not emit this event.
+    InventoryItemUpdated {
+        item: ItemTemplate,
+        previous_location: Option<ItemLocation>,
+    },
+    /// Authoritative worn-item view derived from an inventory snapshot. Items
+    /// are sorted by worn slot and keep their complete optional fields.
+    EquipmentSnapshot { items: Vec<ItemTemplate> },
+    /// One worn slot changed. `item: None` vacates the slot. A move between two
+    /// worn slots therefore emits the old-slot removal before the new value.
+    EquipmentSlotUpdated {
+        slot: u16,
+        item: Option<ItemTemplate>,
+    },
     /// The guild message of the day (OP_GuildMOTD). `message`/`sender` are empty
     /// when the guild has none set. The wire carries no guild id — the MOTD is
     /// implicitly the local player's guild — so the consumer stamps it from the
@@ -633,12 +750,22 @@ pub enum Event {
     /// One AA definition from the OP_SendAATable burst: maps a purchased AA's
     /// `desc_id` to a `title_sid` (a dbstring type-1 id → the AA's display name).
     AaTable { desc_id: u32, title_sid: u32 },
+    /// Final AA title mapping. Repeated identical table rows are suppressed by
+    /// the ordered session.
+    AlternateAbilityDefined(AlternateAbilityDefinition),
     /// The regular experience bar (OP_ExpUpdate), 0..100000 within a level. On
     /// eql there is no discrete level packet — a wrap (decrease) is a ding.
     Exp { exp: u32 },
+    /// Final regular experience state. The session merges level and exp
+    /// packets and suppresses duplicate absolute values.
+    ExperienceUpdated(ExperienceProgress),
     /// AA experience (OP_AAExpUpdate): `alt_exp` 0..100000 toward the next point,
     /// `aa_points` = unspent points.
     AaExp { alt_exp: u32, aa_points: u32 },
+    /// Final incremental AA bar and unspent-point state.
+    AlternateAdvancementUpdated(AlternateAdvancementProgress),
+    /// Final authoritative purchased-AA and point snapshot from the profile.
+    AlternateAdvancementSnapshot(AlternateAdvancementSnapshot),
     /// Hunger / thirst (OP_Stamina), in ticks till the next eat/drink. NOT the
     /// run/jump endurance bar — that is OP_EndUpdate.
     Stamina { food: u32, water: u32 },
@@ -648,6 +775,12 @@ pub enum Event {
     /// A single skill's new value (OP_SkillUpdate) — the consumer updates that
     /// skill id in the player's skill map.
     SkillUpdate { skill_id: u32, value: u32 },
+    /// Final authoritative learned-skill snapshot. Invalid and zero values are
+    /// absent; entries are sorted by skill id.
+    SkillsSnapshot { skills: Vec<SkillValue> },
+    /// Final absolute value for one learned skill. Duplicate values do not emit
+    /// another semantic event.
+    SkillValueUpdated(SkillValue),
     /// A corpse-loot event (OP_LootTransaction): an item confirmation carrying
     /// auto-sale proceeds, or the corpse's coin pile (`from_corpse`, item
     /// fields 0). Both are acquired coin — add `coin_copper` to the running
@@ -673,6 +806,8 @@ pub enum Event {
         silver: u32,
         copper: u32,
     },
+    /// Final carried-purse state. Duplicate purse packets are suppressed.
+    MoneyBalanceUpdated(MoneyBalance),
     /// A string-id server message (OP_SimpleMessage): `format_id` resolves to
     /// text via the eqstr DB (no args); `color` is the wire ChatColor.
     SimpleMessage { format_id: u32, color: u32 },

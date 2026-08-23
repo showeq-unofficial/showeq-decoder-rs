@@ -1,8 +1,10 @@
 use super::*;
 use seq_events::{
-    BuffEntry, DoorInfo, Event, GroundItemInfo, GuildInZone, GuildRosterMember, ItemTemplate,
-    LootItemInfo, PlayerAppearance, PlayerIdentity, PlayerVitals, Point3, Pos, ProfileInfo,
-    SessionResetReason, SpawnInfo, Velocity, VitalValue, ZoneEnvironment, ZoneInfo, ZonePointInfo,
+    AlternateAbilityDefinition, AlternateAbilityRank, AlternateAdvancementProgress,
+    AlternateAdvancementSnapshot, BuffEntry, DoorInfo, Event, ExperienceProgress, GroundItemInfo,
+    GuildInZone, GuildRosterMember, ItemLocation, ItemTemplate, LootItemInfo, MoneyBalance,
+    PlayerAppearance, PlayerIdentity, PlayerVitals, Point3, Pos, ProfileInfo, SessionResetReason,
+    SkillValue, SpawnInfo, Velocity, VitalValue, ZoneEnvironment, ZoneInfo, ZonePointInfo,
 };
 
 fn pos(seed: i32) -> Pos {
@@ -66,19 +68,22 @@ fn profile() -> ProfileInfo {
         aa_ids: vec![26, 27],
         aa_values: vec![28, 29],
         aa_spent: 30,
-        skills: vec![31, 32],
-        class_mask: 33,
-        str_: 34,
-        sta: 35,
-        cha: 36,
-        dex: 37,
-        int_: 38,
-        agi: 39,
-        wis: 40,
-        platinum: 41,
-        gold: 42,
-        silver: 43,
-        copper: 44,
+        aa_assigned: 31,
+        aa_unspent: 32,
+        aa_experience: 33,
+        skills: vec![34, 35],
+        class_mask: 36,
+        str_: 37,
+        sta: 38,
+        cha: 39,
+        dex: 40,
+        int_: 41,
+        agi: 42,
+        wis: 43,
+        platinum: 44,
+        gold: 45,
+        silver: 46,
+        copper: 47,
     }
 }
 
@@ -112,17 +117,21 @@ fn item() -> ItemTemplate {
         name: "item".into(),
         lore_name: "lore".into(),
         item_id: 70,
-        icon: 71,
-        slot_mask: 72,
-        container_id: 73,
-        container_slot: 74,
-        parent_slot: 75,
-        stats: vec![-76, 77],
-        resists: vec![-78, 79],
-        hp: -80,
-        mana: 81,
-        endurance: -82,
-        ac: 83,
+        icon: Some(71),
+        stack_count: Some(72),
+        weight_tenths: Some(73),
+        flags: Some(74),
+        corruption: Some(-75),
+        slot_mask: 76,
+        container_id: 77,
+        container_slot: 78,
+        parent_slot: 79,
+        stats: vec![-80, 81],
+        resists: vec![-82, 83],
+        hp: -84,
+        mana: 85,
+        endurance: -86,
+        ac: 87,
     }
 }
 
@@ -322,6 +331,39 @@ fn canonical_events() -> Vec<Event> {
             items: vec![item()],
         },
         Event::ItemLearned { item: item() },
+        Event::InventorySnapshot {
+            items: vec![item()],
+        },
+        Event::InventoryItemUpdated {
+            item: item(),
+            previous_location: Some(ItemLocation {
+                container_id: 88,
+                container_slot: 89,
+                parent_slot: 90,
+            }),
+        },
+        Event::InventoryItemUpdated {
+            item: ItemTemplate {
+                icon: None,
+                stack_count: None,
+                weight_tenths: None,
+                flags: None,
+                corruption: None,
+                ..item()
+            },
+            previous_location: None,
+        },
+        Event::EquipmentSnapshot {
+            items: vec![item()],
+        },
+        Event::EquipmentSlotUpdated {
+            slot: 91,
+            item: Some(item()),
+        },
+        Event::EquipmentSlotUpdated {
+            slot: 92,
+            item: None,
+        },
         Event::GuildMotd {
             message: "motd".into(),
             sender: "sender".into(),
@@ -385,11 +427,39 @@ fn canonical_events() -> Vec<Event> {
             desc_id: 220,
             title_sid: 221,
         },
+        Event::AlternateAbilityDefined(AlternateAbilityDefinition {
+            ability_id: 222,
+            title_string_id: 223,
+        }),
         Event::Exp { exp: 222 },
+        Event::ExperienceUpdated(ExperienceProgress {
+            experience: 224,
+            level: Some(225),
+            previous_level: None,
+        }),
+        Event::ExperienceUpdated(ExperienceProgress {
+            experience: 226,
+            level: None,
+            previous_level: Some(227),
+        }),
         Event::AaExp {
             alt_exp: 223,
             aa_points: 224,
         },
+        Event::AlternateAdvancementSnapshot(AlternateAdvancementSnapshot {
+            purchased: vec![AlternateAbilityRank {
+                ability_id: 228,
+                rank: 229,
+            }],
+            spent_points: Some(230),
+            assigned_points: None,
+            unspent_points: 231,
+            experience: 232,
+        }),
+        Event::AlternateAdvancementUpdated(AlternateAdvancementProgress {
+            experience: 233,
+            unspent_points: 234,
+        }),
         Event::Stamina {
             food: 225,
             water: 226,
@@ -399,6 +469,16 @@ fn canonical_events() -> Vec<Event> {
             skill_id: 228,
             value: 229,
         },
+        Event::SkillsSnapshot {
+            skills: vec![SkillValue {
+                skill_id: 235,
+                value: 236,
+            }],
+        },
+        Event::SkillValueUpdated(SkillValue {
+            skill_id: 237,
+            value: 238,
+        }),
         Event::LootTransaction {
             corpse_id: 230,
             item_id: 231,
@@ -417,6 +497,12 @@ fn canonical_events() -> Vec<Event> {
             silver: 237,
             copper: 238,
         },
+        Event::MoneyBalanceUpdated(MoneyBalance {
+            platinum: 239,
+            gold: 240,
+            silver: 241,
+            copper: 242,
+        }),
         Event::SimpleMessage {
             format_id: 240,
             color: 241,
@@ -556,6 +642,9 @@ fn unprofile(profile: &ffi::EventProfileInfo) -> ProfileInfo {
         aa_ids: profile.aa_ids.clone(),
         aa_values: profile.aa_values.clone(),
         aa_spent: profile.aa_spent,
+        aa_assigned: profile.aa_assigned,
+        aa_unspent: profile.aa_unspent,
+        aa_experience: profile.aa_experience,
         skills: profile.skills.clone(),
         class_mask: profile.class_mask,
         str_: profile.str_,
@@ -602,7 +691,11 @@ fn unitem(item: &ffi::EventItemTemplate) -> ItemTemplate {
         name: item.name.clone(),
         lore_name: item.lore_name.clone(),
         item_id: item.item_id,
-        icon: item.icon,
+        icon: item.has_icon.then_some(item.icon),
+        stack_count: item.has_stack_count.then_some(item.stack_count),
+        weight_tenths: item.has_weight_tenths.then_some(item.weight_tenths),
+        flags: item.has_flags.then_some(item.flags),
+        corruption: item.has_corruption.then_some(item.corruption),
         slot_mask: item.slot_mask,
         container_id: item.container_id,
         container_slot: item.container_slot,
@@ -849,6 +942,38 @@ fn reconstruct(batch: &ffi::SessionDecodeBatch) -> Vec<Event> {
                 ffi::SessionEventKind::ItemLearned => Event::ItemLearned {
                     item: unitem(&batch.item_learned[i].item),
                 },
+                ffi::SessionEventKind::InventorySnapshot => Event::InventorySnapshot {
+                    items: batch.inventory_snapshot[i]
+                        .items
+                        .iter()
+                        .map(unitem)
+                        .collect(),
+                },
+                ffi::SessionEventKind::InventoryItemUpdated => {
+                    let update = &batch.inventory_item_updated[i];
+                    Event::InventoryItemUpdated {
+                        item: unitem(&update.item),
+                        previous_location: update.has_previous_location.then_some(ItemLocation {
+                            container_id: update.previous_location.container_id,
+                            container_slot: update.previous_location.container_slot,
+                            parent_slot: update.previous_location.parent_slot,
+                        }),
+                    }
+                }
+                ffi::SessionEventKind::EquipmentSnapshot => Event::EquipmentSnapshot {
+                    items: batch.equipment_snapshot[i]
+                        .items
+                        .iter()
+                        .map(unitem)
+                        .collect(),
+                },
+                ffi::SessionEventKind::EquipmentSlotUpdated => {
+                    let update = &batch.equipment_slot_updated[i];
+                    Event::EquipmentSlotUpdated {
+                        slot: update.slot,
+                        item: update.has_item.then(|| unitem(&update.item)),
+                    }
+                }
                 ffi::SessionEventKind::GuildMotd => {
                     let p = &batch.guild_motd[i];
                     Event::GuildMotd {
@@ -961,15 +1086,58 @@ fn reconstruct(batch: &ffi::SessionDecodeBatch) -> Vec<Event> {
                         title_sid: p.title_sid,
                     }
                 }
+                ffi::SessionEventKind::AlternateAbilityDefined => {
+                    let definition = &batch.alternate_ability_defined[i];
+                    Event::AlternateAbilityDefined(AlternateAbilityDefinition {
+                        ability_id: definition.ability_id,
+                        title_string_id: definition.title_string_id,
+                    })
+                }
                 ffi::SessionEventKind::Exp => Event::Exp {
                     exp: batch.exp[i].exp,
                 },
+                ffi::SessionEventKind::ExperienceUpdated => {
+                    let progress = &batch.experience_updated[i];
+                    Event::ExperienceUpdated(ExperienceProgress {
+                        experience: progress.experience,
+                        level: progress.has_level.then_some(progress.level),
+                        previous_level: progress
+                            .has_previous_level
+                            .then_some(progress.previous_level),
+                    })
+                }
                 ffi::SessionEventKind::AaExp => {
                     let p = &batch.aa_exp[i];
                     Event::AaExp {
                         alt_exp: p.alt_exp,
                         aa_points: p.aa_points,
                     }
+                }
+                ffi::SessionEventKind::AlternateAdvancementSnapshot => {
+                    let snapshot = &batch.alternate_advancement_snapshot[i];
+                    Event::AlternateAdvancementSnapshot(AlternateAdvancementSnapshot {
+                        purchased: snapshot
+                            .purchased
+                            .iter()
+                            .map(|rank| AlternateAbilityRank {
+                                ability_id: rank.ability_id,
+                                rank: rank.rank,
+                            })
+                            .collect(),
+                        spent_points: snapshot.has_spent_points.then_some(snapshot.spent_points),
+                        assigned_points: snapshot
+                            .has_assigned_points
+                            .then_some(snapshot.assigned_points),
+                        unspent_points: snapshot.unspent_points,
+                        experience: snapshot.experience,
+                    })
+                }
+                ffi::SessionEventKind::AlternateAdvancementUpdated => {
+                    let progress = &batch.alternate_advancement_updated[i];
+                    Event::AlternateAdvancementUpdated(AlternateAdvancementProgress {
+                        experience: progress.experience,
+                        unspent_points: progress.unspent_points,
+                    })
                 }
                 ffi::SessionEventKind::Stamina => {
                     let p = &batch.stamina[i];
@@ -987,6 +1155,23 @@ fn reconstruct(batch: &ffi::SessionDecodeBatch) -> Vec<Event> {
                         skill_id: p.skill_id,
                         value: p.value,
                     }
+                }
+                ffi::SessionEventKind::SkillsSnapshot => Event::SkillsSnapshot {
+                    skills: batch.skills_snapshot[i]
+                        .skills
+                        .iter()
+                        .map(|skill| SkillValue {
+                            skill_id: skill.skill_id,
+                            value: skill.value,
+                        })
+                        .collect(),
+                },
+                ffi::SessionEventKind::SkillValueUpdated => {
+                    let skill = &batch.skill_value_updated[i];
+                    Event::SkillValueUpdated(SkillValue {
+                        skill_id: skill.skill_id,
+                        value: skill.value,
+                    })
                 }
                 ffi::SessionEventKind::LootTransaction => {
                     let p = &batch.loot_transaction[i];
@@ -1022,6 +1207,15 @@ fn reconstruct(batch: &ffi::SessionDecodeBatch) -> Vec<Event> {
                         silver: p.silver,
                         copper: p.copper,
                     }
+                }
+                ffi::SessionEventKind::MoneyBalanceUpdated => {
+                    let balance = &batch.money_balance_updated[i];
+                    Event::MoneyBalanceUpdated(MoneyBalance {
+                        platinum: balance.platinum,
+                        gold: balance.gold,
+                        silver: balance.silver,
+                        copper: balance.copper,
+                    })
                 }
                 ffi::SessionEventKind::SimpleMessage => {
                     let p = &batch.simple_message[i];
