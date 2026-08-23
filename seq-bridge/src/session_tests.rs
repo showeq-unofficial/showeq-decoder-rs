@@ -1,11 +1,11 @@
 use super::*;
 use seq_events::{
-    AlternateAbilityDefinition, AlternateAbilityRank, AlternateAdvancementProgress,
-    AlternateAdvancementSnapshot, BuffEntry, CorpseLootSnapshot, DoorInfo, Event,
-    ExperienceProgress, GroundItemInfo, GuildInZone, GuildRosterMember, ItemLocation, ItemTemplate,
-    LootAcquisition, LootItemInfo, MoneyBalance, PlayerAppearance, PlayerIdentity, PlayerVitals,
-    Point3, Pos, ProfileInfo, SessionResetReason, SkillValue, SpawnInfo, Velocity, VitalValue,
-    ZoneEnvironment, ZoneInfo, ZonePointInfo,
+    ActiveBuff, AlternateAbilityDefinition, AlternateAbilityRank, AlternateAdvancementProgress,
+    AlternateAdvancementSnapshot, BuffEntry, CastInterruptionReason, CorpseLootSnapshot, DoorInfo,
+    Event, ExperienceProgress, GroundItemInfo, GuildInZone, GuildRosterMember, ItemLocation,
+    ItemTemplate, LootAcquisition, LootItemInfo, MoneyBalance, PlayerAppearance, PlayerIdentity,
+    PlayerVitals, Point3, Pos, ProfileInfo, SessionResetReason, SkillValue, SpawnInfo, Velocity,
+    VitalValue, ZoneEnvironment, ZoneInfo, ZonePointInfo,
 };
 
 fn pos(seed: i32) -> Pos {
@@ -417,10 +417,49 @@ fn canonical_events() -> Vec<Event> {
             damage: -213,
             spell_id: 214,
         },
+        Event::CombatDamage {
+            source_id: Some(210),
+            target_id: None,
+            kind: 212,
+            damage: -213,
+            spell_id: Some(214),
+        },
+        Event::SpellAction {
+            source: 211,
+            target: 212,
+            spell_id: 213,
+            caster_level: 65,
+            kind: 0xe7,
+        },
+        Event::SpellActionResolved {
+            source_id: None,
+            target_id: Some(212),
+            spell_id: 213,
+            caster_level: Some(65),
+            kind: 0xe7,
+        },
+        Event::SpellCastRequest {
+            slot: -1,
+            spell_id: 214,
+            target_id: 0,
+        },
         Event::SpawnCast {
             caster_id: 215,
             spell_id: 216,
             cast_time_ms: 217,
+        },
+        Event::SpellCastStarted {
+            caster_id: Some(215),
+            target_id: None,
+            spell_id: 216,
+            cast_time_ms: Some(217),
+            slot: None,
+        },
+        Event::SpellCastInterrupted {
+            caster_id: None,
+            target_id: Some(218),
+            spell_id: 219,
+            reason: CastInterruptionReason::ReplayEnd,
         },
         Event::Targeted { spawn_id: 218 },
         Event::Considered { spawn_id: 219 },
@@ -585,6 +624,35 @@ fn canonical_events() -> Vec<Event> {
         Event::BuffList {
             owner: 250,
             entries: vec![buff()],
+        },
+        Event::BuffWire {
+            spawn_id: 251,
+            spell_id: 252,
+            form: 2,
+            slot: u8::MAX,
+            duration_ticks: 253,
+            change_type: 4,
+        },
+        Event::BuffAdded(ActiveBuff {
+            owner_id: Some(254),
+            spell_id: 255,
+            remaining_ticks: Some(-1),
+            slot: Some(3),
+            caster_id: None,
+            caster_name: Some("caster".into()),
+        }),
+        Event::BuffUpdated(ActiveBuff {
+            owner_id: None,
+            spell_id: 256,
+            remaining_ticks: None,
+            slot: None,
+            caster_id: Some(257),
+            caster_name: None,
+        }),
+        Event::BuffRemoved {
+            owner_id: Some(258),
+            spell_id: 259,
+            slot: None,
         },
         Event::GroupFollow {
             name: "follow".into(),
@@ -1115,12 +1183,86 @@ fn reconstruct(batch: &ffi::SessionDecodeBatch) -> Vec<Event> {
                         spell_id: p.spell_id,
                     }
                 }
+                ffi::SessionEventKind::CombatDamage => {
+                    let p = &batch.combat_damage[i];
+                    Event::CombatDamage {
+                        source_id: p.has_source_id.then_some(p.source_id),
+                        target_id: p.has_target_id.then_some(p.target_id),
+                        kind: p.kind,
+                        damage: p.damage,
+                        spell_id: p.has_spell_id.then_some(p.spell_id),
+                    }
+                }
+                ffi::SessionEventKind::SpellAction => {
+                    let p = &batch.spell_action[i];
+                    Event::SpellAction {
+                        source: p.source,
+                        target: p.target,
+                        spell_id: p.spell_id,
+                        caster_level: p.caster_level,
+                        kind: p.kind,
+                    }
+                }
+                ffi::SessionEventKind::SpellActionResolved => {
+                    let p = &batch.spell_action_resolved[i];
+                    Event::SpellActionResolved {
+                        source_id: p.has_source_id.then_some(p.source_id),
+                        target_id: p.has_target_id.then_some(p.target_id),
+                        spell_id: p.spell_id,
+                        caster_level: p.has_caster_level.then_some(p.caster_level),
+                        kind: p.kind,
+                    }
+                }
+                ffi::SessionEventKind::SpellCastRequest => {
+                    let p = &batch.spell_cast_request[i];
+                    Event::SpellCastRequest {
+                        slot: p.slot,
+                        spell_id: p.spell_id,
+                        target_id: p.target_id,
+                    }
+                }
                 ffi::SessionEventKind::SpawnCast => {
                     let p = &batch.spawn_cast[i];
                     Event::SpawnCast {
                         caster_id: p.caster_id,
                         spell_id: p.spell_id,
                         cast_time_ms: p.cast_time_ms,
+                    }
+                }
+                ffi::SessionEventKind::SpellCastStarted => {
+                    let p = &batch.spell_cast_started[i];
+                    Event::SpellCastStarted {
+                        caster_id: p.has_caster_id.then_some(p.caster_id),
+                        target_id: p.has_target_id.then_some(p.target_id),
+                        spell_id: p.spell_id,
+                        cast_time_ms: p.has_cast_time_ms.then_some(p.cast_time_ms),
+                        slot: p.has_slot.then_some(p.slot),
+                    }
+                }
+                ffi::SessionEventKind::SpellCastInterrupted => {
+                    let p = &batch.spell_cast_interrupted[i];
+                    Event::SpellCastInterrupted {
+                        caster_id: p.has_caster_id.then_some(p.caster_id),
+                        target_id: p.has_target_id.then_some(p.target_id),
+                        spell_id: p.spell_id,
+                        reason: match p.reason {
+                            ffi::EventCastInterruptionReason::ServerMessage => {
+                                CastInterruptionReason::ServerMessage
+                            }
+                            ffi::EventCastInterruptionReason::Superseded => {
+                                CastInterruptionReason::Superseded
+                            }
+                            ffi::EventCastInterruptionReason::SessionReset => {
+                                CastInterruptionReason::SessionReset
+                            }
+                            ffi::EventCastInterruptionReason::ReplayEnd => {
+                                CastInterruptionReason::ReplayEnd
+                            }
+                            ffi::EventCastInterruptionReason::Shutdown => {
+                                CastInterruptionReason::Shutdown
+                            }
+                            _ => unreachable!("known interruption reason"),
+                        },
                     }
                 }
                 ffi::SessionEventKind::Targeted => Event::Targeted {
@@ -1369,6 +1511,45 @@ fn reconstruct(batch: &ffi::SessionDecodeBatch) -> Vec<Event> {
                                 caster: entry.caster.clone(),
                             })
                             .collect(),
+                    }
+                }
+                ffi::SessionEventKind::BuffWire => {
+                    let p = &batch.buff_wire[i];
+                    Event::BuffWire {
+                        spawn_id: p.spawn_id,
+                        spell_id: p.spell_id,
+                        form: p.form,
+                        slot: p.slot,
+                        duration_ticks: p.duration_ticks,
+                        change_type: p.change_type,
+                    }
+                }
+                ffi::SessionEventKind::BuffAdded | ffi::SessionEventKind::BuffUpdated => {
+                    let p = if reference.kind == ffi::SessionEventKind::BuffAdded {
+                        &batch.buff_added[i]
+                    } else {
+                        &batch.buff_updated[i]
+                    };
+                    let buff = ActiveBuff {
+                        owner_id: p.has_owner_id.then_some(p.owner_id),
+                        spell_id: p.spell_id,
+                        remaining_ticks: p.has_remaining_ticks.then_some(p.remaining_ticks),
+                        slot: p.has_slot.then_some(p.slot),
+                        caster_id: p.has_caster_id.then_some(p.caster_id),
+                        caster_name: p.has_caster_name.then(|| p.caster_name.clone()),
+                    };
+                    if reference.kind == ffi::SessionEventKind::BuffAdded {
+                        Event::BuffAdded(buff)
+                    } else {
+                        Event::BuffUpdated(buff)
+                    }
+                }
+                ffi::SessionEventKind::BuffRemoved => {
+                    let p = &batch.buff_removed[i];
+                    Event::BuffRemoved {
+                        owner_id: p.has_owner_id.then_some(p.owner_id),
+                        spell_id: p.spell_id,
+                        slot: p.has_slot.then_some(p.slot),
                     }
                 }
                 ffi::SessionEventKind::GroupFollow => {

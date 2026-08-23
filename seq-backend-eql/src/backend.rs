@@ -80,8 +80,14 @@ impl Backend for EqlBackend {
             "OP_ClientUpdate" => self_pos(bytes),
             "OP_SelfPos" => self_pos_breadcrumb(bytes),
             "OP_Illusion" => illusion(bytes),
+            "OP_Action" => action(bytes),
             "OP_Action2" => action2(bytes),
-            "OP_BeginCast" => begin_cast(bytes),
+            "OP_BeginCast" if dir == Dir::ServerToClient => begin_cast(bytes),
+            "OP_BeginCast" => Decoded::Ignored,
+            "OP_CastSpell" if dir == Dir::ClientToServer => cast_spell(bytes),
+            "OP_CastSpell" => Decoded::Ignored,
+            "OP_Buff" if dir == Dir::ServerToClient => buff(bytes),
+            "OP_Buff" => Decoded::Ignored,
             "OP_TargetMouse" => target(bytes),
             "OP_Consider" => consider(bytes),
             "OP_CommonMessage" => chat(bytes, dir),
@@ -610,6 +616,67 @@ fn action2(bytes: &[u8]) -> Decoded {
             kind: u32::from(a.kind),
             damage: a.damage,
             spell_id: if a.spell < 0 { 0 } else { a.spell as u32 },
+        }),
+        Err(_) => Decoded::Malformed,
+    }
+}
+
+fn action(bytes: &[u8]) -> Decoded {
+    let parsed = if bytes.len() == crate::action::PAYLOAD_LEN {
+        crate::action::parse_action(bytes).ok().map(|action| {
+            (
+                action.source,
+                action.target,
+                action.spell,
+                action.level,
+                action.kind,
+            )
+        })
+    } else {
+        crate::action_alt::parse_action_alt(bytes)
+            .ok()
+            .map(|action| {
+                (
+                    action.source,
+                    action.target,
+                    action.spell,
+                    action.level,
+                    action.kind,
+                )
+            })
+    };
+    match parsed {
+        Some((source, target, spell_id, caster_level, kind)) => Decoded::One(Event::SpellAction {
+            source: u32::from(source),
+            target: u32::from(target),
+            spell_id: u32::from(spell_id),
+            caster_level,
+            kind,
+        }),
+        None => Decoded::Malformed,
+    }
+}
+
+fn cast_spell(bytes: &[u8]) -> Decoded {
+    match crate::start_cast::parse_start_cast(bytes) {
+        Ok(cast) => Decoded::One(Event::SpellCastRequest {
+            slot: cast.slot,
+            spell_id: cast.spell_id,
+            target_id: cast.target_id,
+        }),
+        Err(_) => Decoded::Malformed,
+    }
+}
+
+fn buff(bytes: &[u8]) -> Decoded {
+    match crate::buff::parse_buff(bytes) {
+        Ok(buff) => Decoded::One(Event::BuffWire {
+            spawn_id: buff.spawn_id,
+            spell_id: buff.spell_id,
+            form: buff.form,
+            slot: buff.slot,
+            duration_ticks: buff.dur_ticks,
+            change_type: buff.change_type,
         }),
         Err(_) => Decoded::Malformed,
     }

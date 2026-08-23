@@ -64,6 +64,26 @@ duplicate confirmation sequences and repeated corpse-window items. Low-level
 additive during the host selector cutover. A host must choose one persistence
 path rather than write both the semantic event and compatibility row.
 
+Combat-family consumers use `CombatDamage`, `SpellActionResolved`,
+`SpellCastStarted`, `SpellCastInterrupted`, `BuffAdded`, `BuffUpdated`, and
+`BuffRemoved`. Optional spawn and spell ids cross CXX as presence flags. In
+particular, melee damage has `has_spell_id = false`; zero, `0xffff`, and
+`0xffffffff` are never semantic spell ids. Unknown positive spell ids remain
+numeric so each host can consult its own spell database without changing shared
+state. Buff duration stays in server ticks. Spell names, icons, beneficial
+flags, and level-scaled durations remain host projection data.
+
+The session pairs an outbound cast request with a server begin-cast broadcast,
+tracks replacement and server-message interruptions, and clears unresolved
+casts on every flush or lifecycle reset. EQL buff lists are authoritative
+snapshots. The session emits removals in prior slot order before additions for
+a replacement snapshot. Live and Test variable buff packets emit incremental
+add, update, and remove events. Hosts must apply those events in batch order and
+must not rebuild buff diffs from the low-level `BuffList` or `BuffWire` values.
+The low-level `Combat`, `SpellAction`, `SpellCastRequest`, `SpawnCast`,
+`BuffList`, and `BuffWire` variants remain additive until both host family
+selectors cut over.
+
 Lifecycle batches have strict ordering. A reset caused by `OP_EnterWorld`, a
 profile, or a confirmed Live/Test zone transition precedes the event that
 caused it. `OP_NewZone` emits `ZoneChanged` followed by

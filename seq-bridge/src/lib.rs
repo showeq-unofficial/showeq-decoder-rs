@@ -824,6 +824,13 @@ mod ffi {
         ZoneTransition = 2,
         Explicit = 3,
     }
+    enum EventCastInterruptionReason {
+        ServerMessage = 0,
+        Superseded = 1,
+        SessionReset = 2,
+        ReplayEnd = 3,
+        Shutdown = 4,
+    }
     enum SessionDisposition {
         Decoded = 0,
         Ignored = 1,
@@ -908,6 +915,16 @@ mod ffi {
         AlternateAbilityDefined = 73,
         CorpseLootSnapshot = 74,
         LootAcquired = 75,
+        CombatDamage = 76,
+        SpellAction = 77,
+        SpellActionResolved = 78,
+        SpellCastRequest = 79,
+        SpellCastStarted = 80,
+        SpellCastInterrupted = 81,
+        BuffWire = 82,
+        BuffAdded = 83,
+        BuffUpdated = 84,
+        BuffRemoved = 85,
     }
 
     struct SessionEventRef {
@@ -1302,10 +1319,61 @@ mod ffi {
         damage: i32,
         spell_id: u32,
     }
+    struct EventCombatDamage {
+        has_source_id: bool,
+        source_id: u32,
+        has_target_id: bool,
+        target_id: u32,
+        kind: u32,
+        damage: i32,
+        has_spell_id: bool,
+        spell_id: u32,
+    }
+    struct EventSpellAction {
+        source: u32,
+        target: u32,
+        spell_id: u32,
+        caster_level: u8,
+        kind: u8,
+    }
+    struct EventSpellActionResolved {
+        has_source_id: bool,
+        source_id: u32,
+        has_target_id: bool,
+        target_id: u32,
+        spell_id: u32,
+        has_caster_level: bool,
+        caster_level: u8,
+        kind: u32,
+    }
+    struct EventSpellCastRequest {
+        slot: i32,
+        spell_id: u32,
+        target_id: u32,
+    }
     struct EventSpawnCast {
         caster_id: u32,
         spell_id: u32,
         cast_time_ms: u32,
+    }
+    struct EventSpellCastStarted {
+        has_caster_id: bool,
+        caster_id: u32,
+        has_target_id: bool,
+        target_id: u32,
+        spell_id: u32,
+        has_cast_time_ms: bool,
+        cast_time_ms: u32,
+        has_slot: bool,
+        slot: i32,
+    }
+    struct EventSpellCastInterrupted {
+        has_caster_id: bool,
+        caster_id: u32,
+        has_target_id: bool,
+        target_id: u32,
+        spell_id: u32,
+        reason: EventCastInterruptionReason,
     }
     struct EventAaTable {
         desc_id: u32,
@@ -1454,6 +1522,34 @@ mod ffi {
         owner: u32,
         entries: Vec<EventBuffEntry>,
     }
+    struct EventBuffWire {
+        spawn_id: u32,
+        spell_id: u32,
+        form: u8,
+        slot: u8,
+        duration_ticks: u32,
+        change_type: u32,
+    }
+    struct EventActiveBuff {
+        has_owner_id: bool,
+        owner_id: u32,
+        spell_id: u32,
+        has_remaining_ticks: bool,
+        remaining_ticks: i32,
+        has_slot: bool,
+        slot: u32,
+        has_caster_id: bool,
+        caster_id: u32,
+        has_caster_name: bool,
+        caster_name: String,
+    }
+    struct EventBuffRemoved {
+        has_owner_id: bool,
+        owner_id: u32,
+        spell_id: u32,
+        has_slot: bool,
+        slot: u32,
+    }
     struct EventGroupFollowPayload {
         name: String,
         level: u32,
@@ -1515,7 +1611,13 @@ mod ffi {
         corpse_located: Vec<EventCorpseLocated>,
         zone_points: Vec<EventZonePoints>,
         combat: Vec<EventCombat>,
+        combat_damage: Vec<EventCombatDamage>,
+        spell_action: Vec<EventSpellAction>,
+        spell_action_resolved: Vec<EventSpellActionResolved>,
+        spell_cast_request: Vec<EventSpellCastRequest>,
         spawn_cast: Vec<EventSpawnCast>,
+        spell_cast_started: Vec<EventSpellCastStarted>,
+        spell_cast_interrupted: Vec<EventSpellCastInterrupted>,
         spawn_id: Vec<EventSpawnId>,
         aa_table: Vec<EventAaTable>,
         alternate_ability_defined: Vec<EventAlternateAbilityDefinition>,
@@ -1541,6 +1643,10 @@ mod ffi {
         loot_message: Vec<EventLootMessagePayload>,
         chat: Vec<EventChat>,
         buff_list: Vec<EventBuffList>,
+        buff_wire: Vec<EventBuffWire>,
+        buff_added: Vec<EventActiveBuff>,
+        buff_updated: Vec<EventActiveBuff>,
+        buff_removed: Vec<EventBuffRemoved>,
         group_follow: Vec<EventGroupFollowPayload>,
         group_disband: Vec<EventGroupDisbandPayload>,
         level_update: Vec<EventLevelUpdatePayload>,
@@ -2158,6 +2264,42 @@ fn event_buff(buff: seq_events::BuffEntry) -> ffi::EventBuffEntry {
     }
 }
 
+fn event_active_buff(buff: seq_events::ActiveBuff) -> ffi::EventActiveBuff {
+    ffi::EventActiveBuff {
+        has_owner_id: buff.owner_id.is_some(),
+        owner_id: buff.owner_id.unwrap_or_default(),
+        spell_id: buff.spell_id,
+        has_remaining_ticks: buff.remaining_ticks.is_some(),
+        remaining_ticks: buff.remaining_ticks.unwrap_or_default(),
+        has_slot: buff.slot.is_some(),
+        slot: buff.slot.unwrap_or_default(),
+        has_caster_id: buff.caster_id.is_some(),
+        caster_id: buff.caster_id.unwrap_or_default(),
+        has_caster_name: buff.caster_name.is_some(),
+        caster_name: buff.caster_name.unwrap_or_default(),
+    }
+}
+
+fn event_cast_interruption_reason(
+    reason: seq_events::CastInterruptionReason,
+) -> ffi::EventCastInterruptionReason {
+    match reason {
+        seq_events::CastInterruptionReason::ServerMessage => {
+            ffi::EventCastInterruptionReason::ServerMessage
+        }
+        seq_events::CastInterruptionReason::Superseded => {
+            ffi::EventCastInterruptionReason::Superseded
+        }
+        seq_events::CastInterruptionReason::SessionReset => {
+            ffi::EventCastInterruptionReason::SessionReset
+        }
+        seq_events::CastInterruptionReason::ReplayEnd => {
+            ffi::EventCastInterruptionReason::ReplayEnd
+        }
+        seq_events::CastInterruptionReason::Shutdown => ffi::EventCastInterruptionReason::Shutdown,
+    }
+}
+
 fn push_ref(
     batch: &mut ffi::SessionDecodeBatch,
     kind: ffi::SessionEventKind,
@@ -2673,6 +2815,78 @@ fn translate_event(batch: &mut ffi::SessionDecodeBatch, event: seq_events::Event
             });
             push_ref(batch, ffi::SessionEventKind::Combat, index);
         }
+        Event::CombatDamage {
+            source_id,
+            target_id,
+            kind,
+            damage,
+            spell_id,
+        } => {
+            let index = batch.combat_damage.len();
+            batch.combat_damage.push(ffi::EventCombatDamage {
+                has_source_id: source_id.is_some(),
+                source_id: source_id.unwrap_or_default(),
+                has_target_id: target_id.is_some(),
+                target_id: target_id.unwrap_or_default(),
+                kind,
+                damage,
+                has_spell_id: spell_id.is_some(),
+                spell_id: spell_id.unwrap_or_default(),
+            });
+            push_ref(batch, ffi::SessionEventKind::CombatDamage, index);
+        }
+        Event::SpellAction {
+            source,
+            target,
+            spell_id,
+            caster_level,
+            kind,
+        } => {
+            let index = batch.spell_action.len();
+            batch.spell_action.push(ffi::EventSpellAction {
+                source,
+                target,
+                spell_id,
+                caster_level,
+                kind,
+            });
+            push_ref(batch, ffi::SessionEventKind::SpellAction, index);
+        }
+        Event::SpellActionResolved {
+            source_id,
+            target_id,
+            spell_id,
+            caster_level,
+            kind,
+        } => {
+            let index = batch.spell_action_resolved.len();
+            batch
+                .spell_action_resolved
+                .push(ffi::EventSpellActionResolved {
+                    has_source_id: source_id.is_some(),
+                    source_id: source_id.unwrap_or_default(),
+                    has_target_id: target_id.is_some(),
+                    target_id: target_id.unwrap_or_default(),
+                    spell_id,
+                    has_caster_level: caster_level.is_some(),
+                    caster_level: caster_level.unwrap_or_default(),
+                    kind,
+                });
+            push_ref(batch, ffi::SessionEventKind::SpellActionResolved, index);
+        }
+        Event::SpellCastRequest {
+            slot,
+            spell_id,
+            target_id,
+        } => {
+            let index = batch.spell_cast_request.len();
+            batch.spell_cast_request.push(ffi::EventSpellCastRequest {
+                slot,
+                spell_id,
+                target_id,
+            });
+            push_ref(batch, ffi::SessionEventKind::SpellCastRequest, index);
+        }
         Event::SpawnCast {
             caster_id,
             spell_id,
@@ -2685,6 +2899,46 @@ fn translate_event(batch: &mut ffi::SessionDecodeBatch, event: seq_events::Event
                 cast_time_ms,
             });
             push_ref(batch, ffi::SessionEventKind::SpawnCast, index);
+        }
+        Event::SpellCastStarted {
+            caster_id,
+            target_id,
+            spell_id,
+            cast_time_ms,
+            slot,
+        } => {
+            let index = batch.spell_cast_started.len();
+            batch.spell_cast_started.push(ffi::EventSpellCastStarted {
+                has_caster_id: caster_id.is_some(),
+                caster_id: caster_id.unwrap_or_default(),
+                has_target_id: target_id.is_some(),
+                target_id: target_id.unwrap_or_default(),
+                spell_id,
+                has_cast_time_ms: cast_time_ms.is_some(),
+                cast_time_ms: cast_time_ms.unwrap_or_default(),
+                has_slot: slot.is_some(),
+                slot: slot.unwrap_or_default(),
+            });
+            push_ref(batch, ffi::SessionEventKind::SpellCastStarted, index);
+        }
+        Event::SpellCastInterrupted {
+            caster_id,
+            target_id,
+            spell_id,
+            reason,
+        } => {
+            let index = batch.spell_cast_interrupted.len();
+            batch
+                .spell_cast_interrupted
+                .push(ffi::EventSpellCastInterrupted {
+                    has_caster_id: caster_id.is_some(),
+                    caster_id: caster_id.unwrap_or_default(),
+                    has_target_id: target_id.is_some(),
+                    target_id: target_id.unwrap_or_default(),
+                    spell_id,
+                    reason: event_cast_interruption_reason(reason),
+                });
+            push_ref(batch, ffi::SessionEventKind::SpellCastInterrupted, index);
         }
         Event::Targeted { spawn_id } => {
             let index = batch.spawn_id.len();
@@ -2991,6 +3245,50 @@ fn translate_event(batch: &mut ffi::SessionDecodeBatch, event: seq_events::Event
             });
             push_ref(batch, ffi::SessionEventKind::BuffList, index);
         }
+        Event::BuffWire {
+            spawn_id,
+            spell_id,
+            form,
+            slot,
+            duration_ticks,
+            change_type,
+        } => {
+            let index = batch.buff_wire.len();
+            batch.buff_wire.push(ffi::EventBuffWire {
+                spawn_id,
+                spell_id,
+                form,
+                slot,
+                duration_ticks,
+                change_type,
+            });
+            push_ref(batch, ffi::SessionEventKind::BuffWire, index);
+        }
+        Event::BuffAdded(buff) => {
+            let index = batch.buff_added.len();
+            batch.buff_added.push(event_active_buff(buff));
+            push_ref(batch, ffi::SessionEventKind::BuffAdded, index);
+        }
+        Event::BuffUpdated(buff) => {
+            let index = batch.buff_updated.len();
+            batch.buff_updated.push(event_active_buff(buff));
+            push_ref(batch, ffi::SessionEventKind::BuffUpdated, index);
+        }
+        Event::BuffRemoved {
+            owner_id,
+            spell_id,
+            slot,
+        } => {
+            let index = batch.buff_removed.len();
+            batch.buff_removed.push(ffi::EventBuffRemoved {
+                has_owner_id: owner_id.is_some(),
+                owner_id: owner_id.unwrap_or_default(),
+                spell_id,
+                has_slot: slot.is_some(),
+                slot: slot.unwrap_or_default(),
+            });
+            push_ref(batch, ffi::SessionEventKind::BuffRemoved, index);
+        }
         Event::GroupFollow { name, level } => {
             let index = batch.group_follow.len();
             batch
@@ -3084,7 +3382,13 @@ fn empty_session_batch(
         corpse_located: Vec::new(),
         zone_points: Vec::new(),
         combat: Vec::new(),
+        combat_damage: Vec::new(),
+        spell_action: Vec::new(),
+        spell_action_resolved: Vec::new(),
+        spell_cast_request: Vec::new(),
         spawn_cast: Vec::new(),
+        spell_cast_started: Vec::new(),
+        spell_cast_interrupted: Vec::new(),
         spawn_id: Vec::new(),
         aa_table: Vec::new(),
         alternate_ability_defined: Vec::new(),
@@ -3110,6 +3414,10 @@ fn empty_session_batch(
         loot_message: Vec::new(),
         chat: Vec::new(),
         buff_list: Vec::new(),
+        buff_wire: Vec::new(),
+        buff_added: Vec::new(),
+        buff_updated: Vec::new(),
+        buff_removed: Vec::new(),
         group_follow: Vec::new(),
         group_disband: Vec::new(),
         level_update: Vec::new(),

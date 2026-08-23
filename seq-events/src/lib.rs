@@ -229,6 +229,43 @@ pub struct BuffEntry {
     pub caster: String,
 }
 
+/// One active spell effect after the ordered session has resolved wire
+/// sentinels and the local player's identity.
+///
+/// Spell names, icons, beneficial flags, and level-scaled durations belong to
+/// host spell databases. The shared event keeps only facts present on the wire.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ActiveBuff {
+    /// The affected spawn. Absent means the session attached before it could
+    /// resolve the local player's spawn id.
+    pub owner_id: Option<u32>,
+    pub spell_id: u32,
+    /// Remaining server ticks. `None` means this wire form carried no duration;
+    /// `Some(value <= 0)` means permanent.
+    pub remaining_ticks: Option<i32>,
+    pub slot: Option<u32>,
+    /// Present when the wire names the caster and the session can resolve that
+    /// name to one unambiguous spawn.
+    pub caster_id: Option<u32>,
+    pub caster_name: Option<String>,
+}
+
+/// Why an in-progress cast ended without a matching action or damage event.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum CastInterruptionReason {
+    /// The server sent a spell-failure or interruption message.
+    ServerMessage = 0,
+    /// Another cast from the same caster replaced the pending cast.
+    Superseded = 1,
+    /// A zone, profile, enter-world, or explicit reset cleared cast state.
+    SessionReset = 2,
+    /// Replay input ended while the cast remained pending.
+    ReplayEnd = 3,
+    /// The owning host shut down while the cast remained pending.
+    Shutdown = 4,
+}
+
 /// One lootable item on a corpse (OP_LootDrops). `item_id` is parsed from the
 /// item-link header; `icon` is the dragitem-atlas id.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -779,6 +816,40 @@ pub enum Event {
         damage: i32,
         spell_id: u32,
     },
+    /// Final damage meaning. Zero and negative wire spell sentinels become
+    /// `None`, so melee never leaks a fabricated spell id to a host.
+    CombatDamage {
+        source_id: Option<u32>,
+        target_id: Option<u32>,
+        kind: u32,
+        damage: i32,
+        spell_id: Option<u32>,
+    },
+    /// Low-level OP_Action result retained while hosts cut over. The session
+    /// emits [`Event::SpellActionResolved`] from it.
+    SpellAction {
+        source: u32,
+        target: u32,
+        spell_id: u32,
+        caster_level: u8,
+        kind: u8,
+    },
+    /// A spell action reached its target. Unknown spell ids remain numeric;
+    /// hosts may resolve a name, but Rust never creates a placeholder name.
+    SpellActionResolved {
+        source_id: Option<u32>,
+        target_id: Option<u32>,
+        spell_id: u32,
+        caster_level: Option<u8>,
+        kind: u32,
+    },
+    /// Low-level outbound OP_CastSpell request retained while hosts cut over.
+    /// The session infers the caster from its local-player identity.
+    SpellCastRequest {
+        slot: i32,
+        spell_id: u32,
+        target_id: u32,
+    },
     /// A spawn started casting a spell (OP_BeginCast). Ids only; the consumer
     /// resolves the caster name from its spawn map and the spell name from its
     /// spell DB. `cast_time_ms` is the wire cast time (0 = instant).
@@ -786,6 +857,22 @@ pub enum Event {
         caster_id: u32,
         spell_id: u32,
         cast_time_ms: u32,
+    },
+    /// A cast began. Every field other than the spell id is optional because a
+    /// cold attachment or one-sided capture may supply only part of the state.
+    SpellCastStarted {
+        caster_id: Option<u32>,
+        target_id: Option<u32>,
+        spell_id: u32,
+        cast_time_ms: Option<u32>,
+        slot: Option<i32>,
+    },
+    /// A pending cast ended without a matching action or damage event.
+    SpellCastInterrupted {
+        caster_id: Option<u32>,
+        target_id: Option<u32>,
+        spell_id: u32,
+        reason: CastInterruptionReason,
     },
     /// The player selected a target (OP_TargetMouse). `spawn_id` 0 = cleared.
     Targeted { spawn_id: u32 },
@@ -904,6 +991,26 @@ pub enum Event {
     /// REPLACES that owner's buffs. `owner` == the player → the buff panel; a
     /// mob → that mob's effects. `remaining_ticks <= 0` on an entry = permanent.
     BuffList { owner: u32, entries: Vec<BuffEntry> },
+    /// Low-level variable OP_Buff result retained while hosts cut over.
+    BuffWire {
+        spawn_id: u32,
+        spell_id: u32,
+        form: u8,
+        slot: u8,
+        duration_ticks: u32,
+        change_type: u32,
+    },
+    /// A spell effect became active in a previously empty owner/slot entry.
+    BuffAdded(ActiveBuff),
+    /// An existing owner/slot entry changed duration or caster attribution.
+    BuffUpdated(ActiveBuff),
+    /// An active effect disappeared. Missing owner or slot values preserve
+    /// partial session state instead of inserting host sentinel ids.
+    BuffRemoved {
+        owner_id: Option<u32>,
+        spell_id: u32,
+        slot: Option<u32>,
+    },
     /// A member joined the group (OP_GroupFollow): `name` (the invitee) is added
     /// to the roster. `level` is the member's wire level (0 if absent).
     GroupFollow { name: String, level: u32 },

@@ -17,9 +17,10 @@ use seq_backend_eql::{backend::EqlBackend, LootTracker, SelfTracker};
 #[cfg(any(feature = "backend-live", feature = "backend-test"))]
 use seq_backend_live::LiveBackend;
 use seq_events::{
-    AlternateAbilityDefinition, AlternateAbilityRank, AlternateAdvancementProgress,
-    AlternateAdvancementSnapshot, Backend, Decoded, ExperienceProgress, ItemTemplate, MoneyBalance,
-    PlayerAppearance, PlayerIdentity, PlayerVitals, SessionResetReason, SkillValue, VitalValue,
+    ActiveBuff, AlternateAbilityDefinition, AlternateAbilityRank, AlternateAdvancementProgress,
+    AlternateAdvancementSnapshot, Backend, CastInterruptionReason, Decoded, ExperienceProgress,
+    ItemTemplate, MoneyBalance, PlayerAppearance, PlayerIdentity, PlayerVitals, SessionResetReason,
+    SkillValue, VitalValue,
 };
 #[cfg(feature = "backend-eql")]
 use seq_events::{CorpseLootSnapshot, LootAcquisition};
@@ -138,6 +139,28 @@ pub struct Session {
     player_id: Option<u32>,
     player_identity: Option<PlayerIdentity>,
     progression: ProgressionState,
+    combat: CombatState,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PendingCast {
+    caster_id: Option<u32>,
+    target_id: Option<u32>,
+    spell_id: u32,
+    cast_time_ms: Option<u32>,
+    slot: Option<i32>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum BuffKey {
+    Slot(u32),
+    Spell(u32),
+}
+
+#[derive(Default)]
+struct CombatState {
+    casts: BTreeMap<Option<u32>, PendingCast>,
+    buffs: BTreeMap<(Option<u32>, BuffKey), ActiveBuff>,
 }
 
 #[derive(Default)]
@@ -281,6 +304,7 @@ impl Session {
             player_id: None,
             player_identity: None,
             progression: ProgressionState::default(),
+            combat: CombatState::default(),
         }
     }
 
@@ -337,7 +361,14 @@ impl Session {
     /// reset marker. Compatibility loot rows remain available through the
     /// separate drain while hosts cut over.
     pub fn flush(&mut self, reason: FlushReason) -> Vec<Event> {
-        let mut events = self.reset_correlations();
+        let interruption_reason = match reason {
+            FlushReason::Shutdown => CastInterruptionReason::Shutdown,
+            FlushReason::ReplayEnd => CastInterruptionReason::ReplayEnd,
+            FlushReason::ZoneTransition | FlushReason::Reset => {
+                CastInterruptionReason::SessionReset
+            }
+        };
+        let mut events = self.reset_correlations(interruption_reason);
         match reason {
             FlushReason::ZoneTransition => events.push(Event::SessionReset {
                 reason: SessionResetReason::ZoneTransition,
@@ -411,22 +442,24 @@ impl Session {
                 _ => None,
             };
             if let Some(reason) = reset {
-                output.extend(self.reset_correlations());
+                output.extend(self.reset_correlations(CastInterruptionReason::SessionReset));
                 output.push(Event::SessionReset { reason });
             }
 
             for event in self.apply_player_semantics(event, opcode_name, direction) {
                 for mut event in self.apply_progression_semantics(event) {
                     self.apply_entity_semantics(&mut event);
-                    let semantic_loot = self.decoder.observe_event(
-                        &event,
-                        opcode_name,
-                        direction,
-                        payload,
-                        timestamp,
-                    );
-                    output.push(event);
-                    output.extend(semantic_loot);
+                    for event in self.apply_combat_semantics(event, direction) {
+                        let semantic_loot = self.decoder.observe_event(
+                            &event,
+                            opcode_name,
+                            direction,
+                            payload,
+                            timestamp,
+                        );
+                        output.push(event);
+                        output.extend(semantic_loot);
+                    }
                 }
             }
         }
@@ -1035,24 +1068,438 @@ impl Session {
         output
     }
 
-    fn reset_correlations(&mut self) -> Vec<Event> {
+    fn apply_combat_semantics(&mut self, event: Event, direction: Direction) -> Vec<Event> {
+        match event {
+            Event::Combat {
+                source,
+                target,
+                kind,
+                damage,
+                spell_id,
+            } => {
+                let source_id = self.directional_id(source, direction);
+                let target_id = nonzero(target);
+                let wire_spell_id = spell_id;
+                let spell_id = valid_spell_id(wire_spell_id);
+                if let Some(spell_id) = spell_id {
+                    self.finish_matching_cast(source_id, spell_id);
+                }
+                vec![
+                    Event::Combat {
+                        source,
+                        target,
+                        kind,
+                        damage,
+                        spell_id: wire_spell_id,
+                    },
+                    Event::CombatDamage {
+                        source_id,
+                        target_id,
+                        kind,
+                        damage,
+                        spell_id,
+                    },
+                ]
+            }
+            Event::SpellAction {
+                source,
+                target,
+                spell_id,
+                caster_level,
+                kind,
+            } => {
+                let source_id = self.directional_id(source, direction);
+                let target_id = nonzero(target);
+                let wire_spell_id = spell_id;
+                let Some(spell_id) = valid_spell_id(wire_spell_id) else {
+                    return vec![Event::SpellAction {
+                        source,
+                        target,
+                        spell_id: wire_spell_id,
+                        caster_level,
+                        kind,
+                    }];
+                };
+                self.finish_matching_cast(source_id, spell_id);
+                vec![
+                    Event::SpellAction {
+                        source,
+                        target,
+                        spell_id,
+                        caster_level,
+                        kind,
+                    },
+                    Event::SpellActionResolved {
+                        source_id,
+                        target_id,
+                        spell_id,
+                        caster_level: Some(caster_level),
+                        kind: u32::from(kind),
+                    },
+                ]
+            }
+            Event::SpellCastRequest {
+                slot,
+                spell_id,
+                target_id,
+            } => {
+                let wire_spell_id = spell_id;
+                let Some(spell_id) = valid_spell_id(wire_spell_id) else {
+                    return vec![Event::SpellCastRequest {
+                        slot,
+                        spell_id: wire_spell_id,
+                        target_id,
+                    }];
+                };
+                let cast = PendingCast {
+                    caster_id: self.player_id,
+                    target_id: nonzero(target_id),
+                    spell_id,
+                    cast_time_ms: None,
+                    slot: (slot >= 0).then_some(slot),
+                };
+                let mut output = vec![Event::SpellCastRequest {
+                    slot,
+                    spell_id,
+                    target_id,
+                }];
+                output.extend(self.start_cast(cast));
+                output
+            }
+            Event::SpawnCast {
+                caster_id,
+                spell_id,
+                cast_time_ms,
+            } => {
+                let wire_spell_id = spell_id;
+                let Some(spell_id) = valid_spell_id(wire_spell_id) else {
+                    return vec![Event::SpawnCast {
+                        caster_id,
+                        spell_id: wire_spell_id,
+                        cast_time_ms,
+                    }];
+                };
+                let caster_id = nonzero(caster_id);
+                let previous = self.combat.casts.get(&caster_id).cloned().or_else(|| {
+                    (caster_id.is_some()
+                        && self
+                            .combat
+                            .casts
+                            .get(&None)
+                            .is_some_and(|cast| cast.spell_id == spell_id))
+                    .then(|| self.combat.casts.remove(&None))
+                    .flatten()
+                });
+                let target_id = previous
+                    .as_ref()
+                    .filter(|cast| cast.spell_id == spell_id)
+                    .and_then(|cast| cast.target_id);
+                let slot = previous
+                    .as_ref()
+                    .filter(|cast| cast.spell_id == spell_id)
+                    .and_then(|cast| cast.slot);
+                let cast = PendingCast {
+                    caster_id,
+                    target_id,
+                    spell_id,
+                    cast_time_ms: Some(cast_time_ms),
+                    slot,
+                };
+                let mut output = vec![Event::SpawnCast {
+                    caster_id: caster_id.unwrap_or_default(),
+                    spell_id,
+                    cast_time_ms,
+                }];
+                output.extend(self.start_cast(cast));
+                output
+            }
+            Event::SimpleMessage { format_id, color } => {
+                let mut output = vec![Event::SimpleMessage { format_id, color }];
+                if direction == Dir::ServerToClient && interrupts_cast(format_id) {
+                    output
+                        .extend(self.interrupt_player_cast(CastInterruptionReason::ServerMessage));
+                }
+                output
+            }
+            Event::BuffList { owner, entries } => {
+                let compatibility = Event::BuffList {
+                    owner,
+                    entries: entries.clone(),
+                };
+                let mut output = vec![compatibility];
+                output.extend(self.apply_buff_snapshot(owner, entries));
+                output
+            }
+            Event::BuffWire {
+                spawn_id,
+                spell_id,
+                form,
+                slot,
+                duration_ticks,
+                change_type,
+            } => {
+                let compatibility = Event::BuffWire {
+                    spawn_id,
+                    spell_id,
+                    form,
+                    slot,
+                    duration_ticks,
+                    change_type,
+                };
+                let mut output = vec![compatibility];
+                output.extend(self.apply_buff_wire(spawn_id, spell_id, form, slot, duration_ticks));
+                output
+            }
+            other => vec![other],
+        }
+    }
+
+    fn directional_id(&self, wire_id: u32, direction: Direction) -> Option<u32> {
+        nonzero(wire_id).or_else(|| {
+            (direction == Dir::ClientToServer)
+                .then_some(self.player_id)
+                .flatten()
+        })
+    }
+
+    fn start_cast(&mut self, mut cast: PendingCast) -> Vec<Event> {
+        let key = cast.caster_id;
+        let mut output = Vec::with_capacity(2);
+        if let Some(previous) = self.combat.casts.remove(&key) {
+            if previous.spell_id == cast.spell_id {
+                cast.target_id = cast.target_id.or(previous.target_id);
+                cast.cast_time_ms = cast.cast_time_ms.or(previous.cast_time_ms);
+                cast.slot = cast.slot.or(previous.slot);
+            } else {
+                output.push(interrupted_event(
+                    previous,
+                    CastInterruptionReason::Superseded,
+                ));
+            }
+        }
+        self.combat.casts.insert(key, cast.clone());
+        output.push(Event::SpellCastStarted {
+            caster_id: cast.caster_id,
+            target_id: cast.target_id,
+            spell_id: cast.spell_id,
+            cast_time_ms: cast.cast_time_ms,
+            slot: cast.slot,
+        });
+        output
+    }
+
+    fn finish_matching_cast(&mut self, source_id: Option<u32>, spell_id: u32) {
+        if self
+            .combat
+            .casts
+            .get(&source_id)
+            .is_some_and(|cast| cast.spell_id == spell_id)
+        {
+            self.combat.casts.remove(&source_id);
+            return;
+        }
+        if source_id == self.player_id {
+            let unknown_key = None;
+            if self
+                .combat
+                .casts
+                .get(&unknown_key)
+                .is_some_and(|cast| cast.spell_id == spell_id)
+            {
+                self.combat.casts.remove(&unknown_key);
+            }
+        }
+    }
+
+    fn interrupt_player_cast(&mut self, reason: CastInterruptionReason) -> Vec<Event> {
+        let mut keys = Vec::with_capacity(2);
+        keys.push(self.player_id);
+        if self.player_id.is_some() {
+            keys.push(None);
+        }
+        keys.into_iter()
+            .filter_map(|key| self.combat.casts.remove(&key))
+            .map(|cast| interrupted_event(cast, reason))
+            .collect()
+    }
+
+    fn apply_buff_snapshot(
+        &mut self,
+        owner: u32,
+        entries: Vec<seq_events::BuffEntry>,
+    ) -> Vec<Event> {
+        let owner_id = self.buff_owner(owner);
+        let mut incoming = BTreeMap::new();
+        for entry in entries {
+            let Some(spell_id) = valid_spell_id(entry.spell_id) else {
+                continue;
+            };
+            let caster_name = (!entry.caster.is_empty()).then_some(entry.caster);
+            let caster_id = caster_name
+                .as_deref()
+                .and_then(|name| self.resolve_caster_name(name));
+            let buff = ActiveBuff {
+                owner_id,
+                spell_id,
+                remaining_ticks: Some(entry.remaining_ticks),
+                slot: Some(entry.slot),
+                caster_id,
+                caster_name,
+            };
+            incoming.insert(BuffKey::Slot(entry.slot), buff);
+        }
+
+        let old_keys: Vec<_> = self
+            .combat
+            .buffs
+            .keys()
+            .filter(|(known_owner, _)| *known_owner == owner_id)
+            .cloned()
+            .collect();
+        let mut output = Vec::new();
+        for key in old_keys {
+            let (_, buff_key) = key;
+            let remove = match (self.combat.buffs.get(&key), incoming.get(&buff_key)) {
+                (Some(old), Some(new)) => old.spell_id != new.spell_id,
+                (Some(_), None) => true,
+                _ => false,
+            };
+            if remove {
+                if let Some(old) = self.combat.buffs.remove(&key) {
+                    output.push(buff_removed(old));
+                }
+            }
+        }
+
+        for (buff_key, buff) in incoming {
+            let key = (owner_id, buff_key);
+            match self.combat.buffs.get(&key) {
+                Some(current) if current == &buff => {}
+                Some(_) => {
+                    self.combat.buffs.insert(key, buff.clone());
+                    output.push(Event::BuffUpdated(buff));
+                }
+                None => {
+                    self.combat.buffs.insert(key, buff.clone());
+                    output.push(Event::BuffAdded(buff));
+                }
+            }
+        }
+        output
+    }
+
+    fn apply_buff_wire(
+        &mut self,
+        spawn_id: u32,
+        spell_id: u32,
+        form: u8,
+        slot: u8,
+        duration_ticks: u32,
+    ) -> Vec<Event> {
+        let Some(spell_id) = valid_spell_id(spell_id) else {
+            return Vec::new();
+        };
+        let owner_id = self.buff_owner(spawn_id);
+        if form == 0 {
+            let keys: Vec<_> = self
+                .combat
+                .buffs
+                .iter()
+                .filter(|((owner, _), buff)| *owner == owner_id && buff.spell_id == spell_id)
+                .map(|(key, _)| *key)
+                .collect();
+            return keys
+                .into_iter()
+                .filter_map(|key| self.combat.buffs.remove(&key))
+                .map(buff_removed)
+                .collect();
+        }
+        if !matches!(form, 1 | 2) {
+            return Vec::new();
+        }
+
+        let explicit_slot = (form == 1 && slot != u8::MAX).then_some(u32::from(slot));
+        let key = explicit_slot
+            .map(BuffKey::Slot)
+            .or_else(|| {
+                self.combat
+                    .buffs
+                    .iter()
+                    .find(|((owner, _), buff)| *owner == owner_id && buff.spell_id == spell_id)
+                    .map(|((_, key), _)| *key)
+            })
+            .unwrap_or(BuffKey::Spell(spell_id));
+        let old = self.combat.buffs.get(&(owner_id, key));
+        let buff = ActiveBuff {
+            owner_id,
+            spell_id,
+            remaining_ticks: (form == 2).then_some(u32_to_i32(duration_ticks)),
+            slot: explicit_slot.or_else(|| old.and_then(|buff| buff.slot)),
+            caster_id: old.and_then(|buff| buff.caster_id),
+            caster_name: old.and_then(|buff| buff.caster_name.clone()),
+        };
+        match old {
+            Some(current) if current == &buff => Vec::new(),
+            Some(_) => {
+                self.combat.buffs.insert((owner_id, key), buff.clone());
+                vec![Event::BuffUpdated(buff)]
+            }
+            None => {
+                self.combat.buffs.insert((owner_id, key), buff.clone());
+                vec![Event::BuffAdded(buff)]
+            }
+        }
+    }
+
+    fn buff_owner(&self, wire_owner: u32) -> Option<u32> {
+        if wire_owner == 0 || self.is_player_id(wire_owner) {
+            self.player_id
+        } else {
+            Some(wire_owner)
+        }
+    }
+
+    fn resolve_caster_name(&self, name: &str) -> Option<u32> {
+        if name == self.player_name {
+            self.player_id
+        } else {
+            self.entities.unique_id(name)
+        }
+    }
+
+    fn reset_combat(&mut self, reason: CastInterruptionReason) -> Vec<Event> {
+        let mut events: Vec<_> = std::mem::take(&mut self.combat.casts)
+            .into_values()
+            .map(|cast| interrupted_event(cast, reason))
+            .collect();
+        events.extend(
+            std::mem::take(&mut self.combat.buffs)
+                .into_values()
+                .map(buff_removed),
+        );
+        events
+    }
+
+    fn reset_correlations(&mut self, cast_reason: CastInterruptionReason) -> Vec<Event> {
+        let mut events = self.reset_combat(cast_reason);
         self.entities.clear();
         self.player_id = None;
         self.update_identity_id();
         self.progression = ProgressionState::default();
-        match &mut self.decoder {
+        let decoder_events = match &mut self.decoder {
             #[cfg(feature = "backend-eql")]
             BackendSession::Eql(state) => {
                 let rows = state.loot_tracker.flush();
-                let events = state.finish_loot_rows(rows);
                 state.loot_tracker.reset();
                 state.self_tracker.reset();
                 state.self_stats.clear();
-                events
+                state.finish_loot_rows(rows)
             }
             #[cfg(any(feature = "backend-live", feature = "backend-test"))]
             BackendSession::Live(_) | BackendSession::Test(_) => Vec::new(),
-        }
+        };
+        events.extend(decoder_events);
+        events
     }
 }
 
@@ -1064,6 +1511,53 @@ fn inventory_key(item: &ItemTemplate) -> String {
         )
     } else {
         item.serial.clone()
+    }
+}
+
+fn valid_spell_id(spell_id: u32) -> Option<u32> {
+    (!matches!(spell_id, 0 | 0xffff | u32::MAX)).then_some(spell_id)
+}
+
+fn interrupts_cast(format_id: u32) -> bool {
+    matches!(
+        format_id,
+        191 | 239
+            | 240
+            | 242
+            | 243
+            | 244
+            | 245
+            | 248
+            | 251
+            | 253
+            | 255
+            | 263
+            | 264
+            | 268
+            | 269
+            | 271
+            | 272
+            | 439
+            | 3_285
+            | 9_035
+            | 9_036
+    )
+}
+
+fn interrupted_event(cast: PendingCast, reason: CastInterruptionReason) -> Event {
+    Event::SpellCastInterrupted {
+        caster_id: cast.caster_id,
+        target_id: cast.target_id,
+        spell_id: cast.spell_id,
+        reason,
+    }
+}
+
+fn buff_removed(buff: ActiveBuff) -> Event {
+    Event::BuffRemoved {
+        owner_id: buff.owner_id,
+        spell_id: buff.spell_id,
+        slot: buff.slot,
     }
 }
 
