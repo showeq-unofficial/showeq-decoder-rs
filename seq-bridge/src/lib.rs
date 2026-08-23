@@ -1826,7 +1826,6 @@ mod ffi {
         // method returns the rows that COMPLETED on this event, usually none.
         type EqlLootTracker;
         fn eql_loot_tracker_new() -> Box<EqlLootTracker>;
-        fn set_zone(self: &mut EqlLootTracker, zone_short: &str) -> Vec<LootRow>;
         fn on_loot_message(
             self: &mut EqlLootTracker,
             color: u32,
@@ -4065,9 +4064,6 @@ fn loot_rows_to_ffi(rows: Vec<seq_backend_eql::LootRow>) -> Vec<ffi::LootRow> {
 
 #[cfg(feature = "backend-eql")]
 impl EqlLootTracker {
-    fn set_zone(&mut self, zone_short: &str) -> Vec<ffi::LootRow> {
-        loot_rows_to_ffi(self.0.set_zone(zone_short))
-    }
     fn on_loot_message(
         &mut self,
         color: u32,
@@ -4119,9 +4115,6 @@ fn eql_loot_tracker_new() -> Box<EqlLootTracker> {
 
 #[cfg(not(feature = "backend-eql"))]
 impl EqlLootTracker {
-    fn set_zone(&mut self, _zone_short: &str) -> Vec<ffi::LootRow> {
-        Vec::new()
-    }
     fn on_loot_message(
         &mut self,
         _color: u32,
