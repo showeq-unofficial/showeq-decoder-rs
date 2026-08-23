@@ -185,6 +185,8 @@ def metadata() -> dict[str, dict[str, object]]:
         family = row.get("family")
         internal = row.get("internal_only")
         reason = row.get("internal_only_reason")
+        projection_required = row.get("projection_required", not internal)
+        projection_reason = row.get("projection_not_applicable_reason")
         if not isinstance(name, str) or not name:
             raise CoverageError("every metadata row needs a non-empty name")
         if name in result:
@@ -199,10 +201,34 @@ def metadata() -> dict[str, dict[str, object]]:
             raise CoverageError(
                 f"Event::{name} is host-visible but has internal_only_reason"
             )
+        if not isinstance(projection_required, bool):
+            raise CoverageError(f"Event::{name} needs boolean projection_required")
+        if internal and "projection_required" in row:
+            raise CoverageError(
+                f"Event::{name} is internal-only and must not set projection_required"
+            )
+        if internal and projection_reason is not None:
+            raise CoverageError(
+                f"Event::{name} is internal-only and must not set projection_not_applicable_reason"
+            )
+        if not internal and not projection_required and (
+            not isinstance(projection_reason, str) or not projection_reason.strip()
+        ):
+            raise CoverageError(
+                f"Event::{name} needs a projection_not_applicable_reason"
+            )
+        if not internal and projection_required and projection_reason is not None:
+            raise CoverageError(
+                f"Event::{name} requires projection but has projection_not_applicable_reason"
+            )
         result[name] = {
             "family": family,
             "internal_only": internal,
             "internal_only_reason": reason if internal else None,
+            "projection_required": projection_required,
+            "projection_not_applicable_reason": (
+                projection_reason if not internal and not projection_required else None
+            ),
         }
     return result
 
@@ -397,10 +423,22 @@ def host_template(host: str, output: Path) -> None:
                 "",
                 "[[events]]",
                 f'name = "{event["name"]}"',
-                'projection = "not_applicable"' if event["internal_only"] else 'projection = "missing"',
+                (
+                    'projection = "not_applicable"'
+                    if event["internal_only"] or not event["projection_required"]
+                    else 'projection = "missing"'
+                ),
                 'state = "not_applicable"' if event["internal_only"] else 'state = "missing"',
                 'persistence = "not_applicable"' if event["internal_only"] else 'persistence = "missing"',
-                'notes = "Internal-only by contract."' if event["internal_only"] else 'notes = ""',
+                (
+                    'notes = "Internal-only by contract."'
+                    if event["internal_only"]
+                    else (
+                        'notes = "No standalone host projection by contract."'
+                        if not event["projection_required"]
+                        else 'notes = ""'
+                    )
+                ),
             ]
         )
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -436,11 +474,21 @@ def check_host(path: Path, strict: bool) -> None:
             raise CoverageError(
                 f"{path}: internal-only Event::{name} must be not_applicable"
             )
+        if (
+            not expected[name]["internal_only"]
+            and not expected[name]["projection_required"]
+            and row.get("projection") != "not_applicable"
+        ):
+            raise CoverageError(
+                f"{path}: Event::{name} has no standalone projection contract "
+                "and must be not_applicable"
+            )
         if strict and any(status in {"legacy", "missing"} for status in statuses):
             unfinished.add(name)
         if (
             strict
             and not expected[name]["internal_only"]
+            and expected[name]["projection_required"]
             and row.get("projection") != "rust"
         ):
             unfinished.add(name)

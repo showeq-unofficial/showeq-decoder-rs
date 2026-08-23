@@ -17,6 +17,8 @@ struct ManifestEvent {
     family: String,
     internal_only: bool,
     internal_only_reason: Option<String>,
+    projection_required: bool,
+    projection_not_applicable_reason: Option<String>,
 }
 
 #[test]
@@ -66,5 +68,27 @@ fn manifest_covers_every_event_variant_exactly_once() {
             "{} has inconsistent internal-only documentation",
             event.name
         );
+        if event.internal_only {
+            assert!(
+                !event.projection_required,
+                "{} is internal-only",
+                event.name
+            );
+            assert!(
+                event.projection_not_applicable_reason.is_none(),
+                "{} duplicates its internal-only reason",
+                event.name
+            );
+        } else {
+            assert_eq!(
+                event.projection_required,
+                event
+                    .projection_not_applicable_reason
+                    .as_ref()
+                    .is_none_or(|reason| reason.trim().is_empty()),
+                "{} has inconsistent projection documentation",
+                event.name
+            );
+        }
     }
 }

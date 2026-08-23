@@ -5,6 +5,8 @@
 name = "SessionReset"
 family = "lifecycle"
 internal_only = false
+projection_required = false
+projection_not_applicable_reason = "Session reset controls host state and has no standalone seq.v1 payload."
 
 [[events]]
 name = "PlayerIdentityUpdated"
@@ -114,6 +116,8 @@ internal_only = false
 name = "ZoneTransition"
 family = "lifecycle"
 internal_only = false
+projection_required = false
+projection_not_applicable_reason = "Zone transition controls zoning state; ZoneChanged owns the public zone payload."
 
 [[events]]
 name = "ZoneChanged"
@@ -124,11 +128,15 @@ internal_only = false
 name = "ZoneEnvironmentChanged"
 family = "lifecycle"
 internal_only = false
+projection_required = false
+projection_not_applicable_reason = "Zone environment enriches host zone state and has no standalone seq.v1 payload."
 
 [[events]]
 name = "PlayerProfile"
 family = "player"
 internal_only = false
+projection_required = false
+projection_not_applicable_reason = "The profile seeds host state that final semantic events expose through existing seq.v1 payloads."
 
 [[events]]
 name = "Stance"
@@ -254,6 +262,8 @@ internal_only = false
 name = "ZonePoints"
 family = "entities_spatial"
 internal_only = false
+projection_required = false
+projection_not_applicable_reason = "Zone points are host navigation state and have no standalone seq.v1 payload."
 
 [[events]]
 name = "Combat"
@@ -276,6 +286,8 @@ internal_only_reason = "The ordered session correlates casting state and emits S
 name = "SpellActionResolved"
 family = "combat_spells"
 internal_only = false
+projection_required = false
+projection_not_applicable_reason = "Spell resolution completes cast correlation; damage and buff events own public payloads."
 
 [[events]]
 name = "SpellCastRequest"
@@ -298,6 +310,8 @@ internal_only = false
 name = "SpellCastInterrupted"
 family = "combat_spells"
 internal_only = false
+projection_required = false
+projection_not_applicable_reason = "Cast interruption clears host cast state; seq.v1 exposes only cast starts."
 
 [[events]]
 name = "Targeted"
@@ -319,6 +333,8 @@ internal_only_reason = "The ordered session deduplicates definitions and emits A
 name = "AlternateAbilityDefined"
 family = "items_progression"
 internal_only = false
+projection_required = false
+projection_not_applicable_reason = "Alternate ability definitions enrich names used by later PlayerStats payloads."
 
 [[events]]
 name = "Exp"
@@ -514,6 +530,8 @@ internal_only_reason = "The ordered session combines both dynamic-zone halves in
 name = "DynamicZoneUpdated"
 family = "communication_social"
 internal_only = false
+projection_required = false
+projection_not_applicable_reason = "Dynamic-zone updates maintain host state and have no standalone seq.v1 payload."
 
 [[events]]
 name = "LevelUpdate"
@@ -525,3 +543,5 @@ internal_only_reason = "The ordered session merges level and experience state in
 name = "EnterWorld"
 family = "lifecycle"
 internal_only = false
+projection_required = false
+projection_not_applicable_reason = "Enter-world establishes session identity and has no standalone seq.v1 payload."

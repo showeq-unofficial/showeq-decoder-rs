@@ -7,589 +7,785 @@
       "name": "SessionReset",
       "family": "lifecycle",
       "internal_only": false,
-      "internal_only_reason": null
+      "internal_only_reason": null,
+      "projection_required": false,
+      "projection_not_applicable_reason": "Session reset controls host state and has no standalone seq.v1 payload."
     },
     {
       "name": "PlayerIdentityUpdated",
       "family": "player",
       "internal_only": false,
-      "internal_only_reason": null
+      "internal_only_reason": null,
+      "projection_required": true,
+      "projection_not_applicable_reason": null
     },
     {
       "name": "PlayerMoved",
       "family": "player",
       "internal_only": false,
-      "internal_only_reason": null
+      "internal_only_reason": null,
+      "projection_required": true,
+      "projection_not_applicable_reason": null
     },
     {
       "name": "PlayerVitalsUpdated",
       "family": "player",
       "internal_only": false,
-      "internal_only_reason": null
+      "internal_only_reason": null,
+      "projection_required": true,
+      "projection_not_applicable_reason": null
     },
     {
       "name": "SpawnHealthUpdated",
       "family": "entities_spatial",
       "internal_only": false,
-      "internal_only_reason": null
+      "internal_only_reason": null,
+      "projection_required": true,
+      "projection_not_applicable_reason": null
     },
     {
       "name": "PlayerDied",
       "family": "player",
       "internal_only": false,
-      "internal_only_reason": null
+      "internal_only_reason": null,
+      "projection_required": true,
+      "projection_not_applicable_reason": null
     },
     {
       "name": "SpawnDied",
       "family": "entities_spatial",
       "internal_only": false,
-      "internal_only_reason": null
+      "internal_only_reason": null,
+      "projection_required": true,
+      "projection_not_applicable_reason": null
     },
     {
       "name": "SpawnIdentityUpdated",
       "family": "entities_spatial",
       "internal_only": false,
-      "internal_only_reason": null
+      "internal_only_reason": null,
+      "projection_required": true,
+      "projection_not_applicable_reason": null
     },
     {
       "name": "PlayerAppearanceUpdated",
       "family": "player",
       "internal_only": false,
-      "internal_only_reason": null
+      "internal_only_reason": null,
+      "projection_required": true,
+      "projection_not_applicable_reason": null
     },
     {
       "name": "SpawnAdded",
       "family": "entities_spatial",
       "internal_only": false,
-      "internal_only_reason": null
+      "internal_only_reason": null,
+      "projection_required": true,
+      "projection_not_applicable_reason": null
     },
     {
       "name": "SpawnMoved",
       "family": "entities_spatial",
       "internal_only": false,
-      "internal_only_reason": null
+      "internal_only_reason": null,
+      "projection_required": true,
+      "projection_not_applicable_reason": null
     },
     {
       "name": "SpawnRemoved",
       "family": "entities_spatial",
       "internal_only": false,
-      "internal_only_reason": null
+      "internal_only_reason": null,
+      "projection_required": true,
+      "projection_not_applicable_reason": null
     },
     {
       "name": "SpawnRenamed",
       "family": "entities_spatial",
       "internal_only": false,
-      "internal_only_reason": null
+      "internal_only_reason": null,
+      "projection_required": true,
+      "projection_not_applicable_reason": null
     },
     {
       "name": "SpawnKilled",
       "family": "entities_spatial",
       "internal_only": true,
-      "internal_only_reason": "The ordered session converts it to PlayerDied or SpawnDied before host projection."
+      "internal_only_reason": "The ordered session converts it to PlayerDied or SpawnDied before host projection.",
+      "projection_required": false,
+      "projection_not_applicable_reason": null
     },
     {
       "name": "SpawnHp",
       "family": "entities_spatial",
       "internal_only": true,
-      "internal_only_reason": "The ordered session converts it to PlayerVitalsUpdated or SpawnHealthUpdated."
+      "internal_only_reason": "The ordered session converts it to PlayerVitalsUpdated or SpawnHealthUpdated.",
+      "projection_required": false,
+      "projection_not_applicable_reason": null
     },
     {
       "name": "StatSync",
       "family": "player",
       "internal_only": true,
-      "internal_only_reason": "The ordered session resolves self ownership and emits PlayerVitalsUpdated or SpawnHealthUpdated."
+      "internal_only_reason": "The ordered session resolves self ownership and emits PlayerVitalsUpdated or SpawnHealthUpdated.",
+      "projection_required": false,
+      "projection_not_applicable_reason": null
     },
     {
       "name": "SelfPos",
       "family": "player",
       "internal_only": true,
-      "internal_only_reason": "The ordered session resolves the local player and emits PlayerMoved."
+      "internal_only_reason": "The ordered session resolves the local player and emits PlayerMoved.",
+      "projection_required": false,
+      "projection_not_applicable_reason": null
     },
     {
       "name": "SpawnAnimation",
       "family": "entities_spatial",
       "internal_only": false,
-      "internal_only_reason": null
+      "internal_only_reason": null,
+      "projection_required": true,
+      "projection_not_applicable_reason": null
     },
     {
       "name": "SpawnIllusion",
       "family": "entities_spatial",
       "internal_only": false,
-      "internal_only_reason": null
+      "internal_only_reason": null,
+      "projection_required": true,
+      "projection_not_applicable_reason": null
     },
     {
       "name": "GuildsInZone",
       "family": "communication_social",
       "internal_only": false,
-      "internal_only_reason": null
+      "internal_only_reason": null,
+      "projection_required": true,
+      "projection_not_applicable_reason": null
     },
     {
       "name": "TimeOfDay",
       "family": "lifecycle",
       "internal_only": false,
-      "internal_only_reason": null
+      "internal_only_reason": null,
+      "projection_required": true,
+      "projection_not_applicable_reason": null
     },
     {
       "name": "ZoneTransition",
       "family": "lifecycle",
       "internal_only": false,
-      "internal_only_reason": null
+      "internal_only_reason": null,
+      "projection_required": false,
+      "projection_not_applicable_reason": "Zone transition controls zoning state; ZoneChanged owns the public zone payload."
     },
     {
       "name": "ZoneChanged",
       "family": "lifecycle",
       "internal_only": false,
-      "internal_only_reason": null
+      "internal_only_reason": null,
+      "projection_required": true,
+      "projection_not_applicable_reason": null
     },
     {
       "name": "ZoneEnvironmentChanged",
       "family": "lifecycle",
       "internal_only": false,
-      "internal_only_reason": null
+      "internal_only_reason": null,
+      "projection_required": false,
+      "projection_not_applicable_reason": "Zone environment enriches host zone state and has no standalone seq.v1 payload."
     },
     {
       "name": "PlayerProfile",
       "family": "player",
       "internal_only": false,
-      "internal_only_reason": null
+      "internal_only_reason": null,
+      "projection_required": false,
+      "projection_not_applicable_reason": "The profile seeds host state that final semantic events expose through existing seq.v1 payloads."
     },
     {
       "name": "Stance",
       "family": "player",
       "internal_only": false,
-      "internal_only_reason": null
+      "internal_only_reason": null,
+      "projection_required": true,
+      "projection_not_applicable_reason": null
     },
     {
       "name": "Invocation",
       "family": "player",
       "internal_only": false,
-      "internal_only_reason": null
+      "internal_only_reason": null,
+      "projection_required": true,
+      "projection_not_applicable_reason": null
     },
     {
       "name": "InspectAnswer",
       "family": "player",
       "internal_only": false,
-      "internal_only_reason": null
+      "internal_only_reason": null,
+      "projection_required": true,
+      "projection_not_applicable_reason": null
     },
     {
       "name": "GuildRoster",
       "family": "communication_social",
       "internal_only": false,
-      "internal_only_reason": null
+      "internal_only_reason": null,
+      "projection_required": true,
+      "projection_not_applicable_reason": null
     },
     {
       "name": "GuildRosterWire",
       "family": "communication_social",
       "internal_only": true,
-      "internal_only_reason": "The ordered session applies completeness rules and emits GuildRosterUpdated."
+      "internal_only_reason": "The ordered session applies completeness rules and emits GuildRosterUpdated.",
+      "projection_required": false,
+      "projection_not_applicable_reason": null
     },
     {
       "name": "GuildRosterUpdated",
       "family": "communication_social",
       "internal_only": false,
-      "internal_only_reason": null
+      "internal_only_reason": null,
+      "projection_required": true,
+      "projection_not_applicable_reason": null
     },
     {
       "name": "GuildMemberStatus",
       "family": "communication_social",
       "internal_only": true,
-      "internal_only_reason": "The ordered session folds the member delta into GuildRosterUpdated."
+      "internal_only_reason": "The ordered session folds the member delta into GuildRosterUpdated.",
+      "projection_required": false,
+      "projection_not_applicable_reason": null
     },
     {
       "name": "ZoneServerInfo",
       "family": "lifecycle",
       "internal_only": false,
-      "internal_only_reason": null
+      "internal_only_reason": null,
+      "projection_required": true,
+      "projection_not_applicable_reason": null
     },
     {
       "name": "ItemSet",
       "family": "items_progression",
       "internal_only": false,
-      "internal_only_reason": null
+      "internal_only_reason": null,
+      "projection_required": true,
+      "projection_not_applicable_reason": null
     },
     {
       "name": "ItemLearned",
       "family": "items_progression",
       "internal_only": false,
-      "internal_only_reason": null
+      "internal_only_reason": null,
+      "projection_required": true,
+      "projection_not_applicable_reason": null
     },
     {
       "name": "InventorySnapshot",
       "family": "items_progression",
       "internal_only": false,
-      "internal_only_reason": null
+      "internal_only_reason": null,
+      "projection_required": true,
+      "projection_not_applicable_reason": null
     },
     {
       "name": "InventoryItemUpdated",
       "family": "items_progression",
       "internal_only": false,
-      "internal_only_reason": null
+      "internal_only_reason": null,
+      "projection_required": true,
+      "projection_not_applicable_reason": null
     },
     {
       "name": "EquipmentSnapshot",
       "family": "items_progression",
       "internal_only": false,
-      "internal_only_reason": null
+      "internal_only_reason": null,
+      "projection_required": true,
+      "projection_not_applicable_reason": null
     },
     {
       "name": "EquipmentSlotUpdated",
       "family": "items_progression",
       "internal_only": false,
-      "internal_only_reason": null
+      "internal_only_reason": null,
+      "projection_required": true,
+      "projection_not_applicable_reason": null
     },
     {
       "name": "GuildMotd",
       "family": "communication_social",
       "internal_only": true,
-      "internal_only_reason": "The ordered session resolves the guild id and emits GuildMotdUpdated."
+      "internal_only_reason": "The ordered session resolves the guild id and emits GuildMotdUpdated.",
+      "projection_required": false,
+      "projection_not_applicable_reason": null
     },
     {
       "name": "GuildMotdUpdated",
       "family": "communication_social",
       "internal_only": false,
-      "internal_only_reason": null
+      "internal_only_reason": null,
+      "projection_required": true,
+      "projection_not_applicable_reason": null
     },
     {
       "name": "GuildRankName",
       "family": "communication_social",
       "internal_only": true,
-      "internal_only_reason": "The ordered session accumulates the rank table and emits GuildRankNamesUpdated."
+      "internal_only_reason": "The ordered session accumulates the rank table and emits GuildRankNamesUpdated.",
+      "projection_required": false,
+      "projection_not_applicable_reason": null
     },
     {
       "name": "GuildRankNamesUpdated",
       "family": "communication_social",
       "internal_only": false,
-      "internal_only_reason": null
+      "internal_only_reason": null,
+      "projection_required": true,
+      "projection_not_applicable_reason": null
     },
     {
       "name": "LoadoutSwap",
       "family": "player",
       "internal_only": true,
-      "internal_only_reason": "The ordered session resolves self ownership and emits PlayerIdentityUpdated or SpawnIdentityUpdated."
+      "internal_only_reason": "The ordered session resolves self ownership and emits PlayerIdentityUpdated or SpawnIdentityUpdated.",
+      "projection_required": false,
+      "projection_not_applicable_reason": null
     },
     {
       "name": "Doors",
       "family": "entities_spatial",
       "internal_only": false,
-      "internal_only_reason": null
+      "internal_only_reason": null,
+      "projection_required": true,
+      "projection_not_applicable_reason": null
     },
     {
       "name": "GroundItemRemoved",
       "family": "entities_spatial",
       "internal_only": false,
-      "internal_only_reason": null
+      "internal_only_reason": null,
+      "projection_required": true,
+      "projection_not_applicable_reason": null
     },
     {
       "name": "GroundItem",
       "family": "entities_spatial",
       "internal_only": false,
-      "internal_only_reason": null
+      "internal_only_reason": null,
+      "projection_required": true,
+      "projection_not_applicable_reason": null
     },
     {
       "name": "CorpseLocated",
       "family": "entities_spatial",
       "internal_only": false,
-      "internal_only_reason": null
+      "internal_only_reason": null,
+      "projection_required": true,
+      "projection_not_applicable_reason": null
     },
     {
       "name": "ZonePoints",
       "family": "entities_spatial",
       "internal_only": false,
-      "internal_only_reason": null
+      "internal_only_reason": null,
+      "projection_required": false,
+      "projection_not_applicable_reason": "Zone points are host navigation state and have no standalone seq.v1 payload."
     },
     {
       "name": "Combat",
       "family": "combat_spells",
       "internal_only": true,
-      "internal_only_reason": "The ordered session normalizes wire sentinels and emits CombatDamage."
+      "internal_only_reason": "The ordered session normalizes wire sentinels and emits CombatDamage.",
+      "projection_required": false,
+      "projection_not_applicable_reason": null
     },
     {
       "name": "CombatDamage",
       "family": "combat_spells",
       "internal_only": false,
-      "internal_only_reason": null
+      "internal_only_reason": null,
+      "projection_required": true,
+      "projection_not_applicable_reason": null
     },
     {
       "name": "SpellAction",
       "family": "combat_spells",
       "internal_only": true,
-      "internal_only_reason": "The ordered session correlates casting state and emits SpellActionResolved."
+      "internal_only_reason": "The ordered session correlates casting state and emits SpellActionResolved.",
+      "projection_required": false,
+      "projection_not_applicable_reason": null
     },
     {
       "name": "SpellActionResolved",
       "family": "combat_spells",
       "internal_only": false,
-      "internal_only_reason": null
+      "internal_only_reason": null,
+      "projection_required": false,
+      "projection_not_applicable_reason": "Spell resolution completes cast correlation; damage and buff events own public payloads."
     },
     {
       "name": "SpellCastRequest",
       "family": "combat_spells",
       "internal_only": true,
-      "internal_only_reason": "The ordered session correlates the request with SpawnCast and emits SpellCastStarted."
+      "internal_only_reason": "The ordered session correlates the request with SpawnCast and emits SpellCastStarted.",
+      "projection_required": false,
+      "projection_not_applicable_reason": null
     },
     {
       "name": "SpawnCast",
       "family": "combat_spells",
       "internal_only": true,
-      "internal_only_reason": "The ordered session correlates the cast with SpellCastRequest and emits SpellCastStarted."
+      "internal_only_reason": "The ordered session correlates the cast with SpellCastRequest and emits SpellCastStarted.",
+      "projection_required": false,
+      "projection_not_applicable_reason": null
     },
     {
       "name": "SpellCastStarted",
       "family": "combat_spells",
       "internal_only": false,
-      "internal_only_reason": null
+      "internal_only_reason": null,
+      "projection_required": true,
+      "projection_not_applicable_reason": null
     },
     {
       "name": "SpellCastInterrupted",
       "family": "combat_spells",
       "internal_only": false,
-      "internal_only_reason": null
+      "internal_only_reason": null,
+      "projection_required": false,
+      "projection_not_applicable_reason": "Cast interruption clears host cast state; seq.v1 exposes only cast starts."
     },
     {
       "name": "Targeted",
       "family": "entities_spatial",
       "internal_only": false,
-      "internal_only_reason": null
+      "internal_only_reason": null,
+      "projection_required": true,
+      "projection_not_applicable_reason": null
     },
     {
       "name": "Considered",
       "family": "entities_spatial",
       "internal_only": false,
-      "internal_only_reason": null
+      "internal_only_reason": null,
+      "projection_required": true,
+      "projection_not_applicable_reason": null
     },
     {
       "name": "AaTable",
       "family": "items_progression",
       "internal_only": true,
-      "internal_only_reason": "The ordered session deduplicates definitions and emits AlternateAbilityDefined."
+      "internal_only_reason": "The ordered session deduplicates definitions and emits AlternateAbilityDefined.",
+      "projection_required": false,
+      "projection_not_applicable_reason": null
     },
     {
       "name": "AlternateAbilityDefined",
       "family": "items_progression",
       "internal_only": false,
-      "internal_only_reason": null
+      "internal_only_reason": null,
+      "projection_required": false,
+      "projection_not_applicable_reason": "Alternate ability definitions enrich names used by later PlayerStats payloads."
     },
     {
       "name": "Exp",
       "family": "items_progression",
       "internal_only": true,
-      "internal_only_reason": "The ordered session merges level state and emits ExperienceUpdated."
+      "internal_only_reason": "The ordered session merges level state and emits ExperienceUpdated.",
+      "projection_required": false,
+      "projection_not_applicable_reason": null
     },
     {
       "name": "ExperienceUpdated",
       "family": "items_progression",
       "internal_only": false,
-      "internal_only_reason": null
+      "internal_only_reason": null,
+      "projection_required": true,
+      "projection_not_applicable_reason": null
     },
     {
       "name": "AaExp",
       "family": "items_progression",
       "internal_only": true,
-      "internal_only_reason": "The ordered session emits AlternateAdvancementUpdated."
+      "internal_only_reason": "The ordered session emits AlternateAdvancementUpdated.",
+      "projection_required": false,
+      "projection_not_applicable_reason": null
     },
     {
       "name": "AlternateAdvancementUpdated",
       "family": "items_progression",
       "internal_only": false,
-      "internal_only_reason": null
+      "internal_only_reason": null,
+      "projection_required": true,
+      "projection_not_applicable_reason": null
     },
     {
       "name": "AlternateAdvancementSnapshot",
       "family": "items_progression",
       "internal_only": false,
-      "internal_only_reason": null
+      "internal_only_reason": null,
+      "projection_required": true,
+      "projection_not_applicable_reason": null
     },
     {
       "name": "Stamina",
       "family": "player",
       "internal_only": false,
-      "internal_only_reason": null
+      "internal_only_reason": null,
+      "projection_required": true,
+      "projection_not_applicable_reason": null
     },
     {
       "name": "ManaUpdate",
       "family": "player",
       "internal_only": true,
-      "internal_only_reason": "The ordered session emits PlayerVitalsUpdated."
+      "internal_only_reason": "The ordered session emits PlayerVitalsUpdated.",
+      "projection_required": false,
+      "projection_not_applicable_reason": null
     },
     {
       "name": "SkillUpdate",
       "family": "items_progression",
       "internal_only": true,
-      "internal_only_reason": "The ordered session suppresses duplicate values and emits SkillValueUpdated."
+      "internal_only_reason": "The ordered session suppresses duplicate values and emits SkillValueUpdated.",
+      "projection_required": false,
+      "projection_not_applicable_reason": null
     },
     {
       "name": "SkillsSnapshot",
       "family": "items_progression",
       "internal_only": false,
-      "internal_only_reason": null
+      "internal_only_reason": null,
+      "projection_required": true,
+      "projection_not_applicable_reason": null
     },
     {
       "name": "SkillValueUpdated",
       "family": "items_progression",
       "internal_only": false,
-      "internal_only_reason": null
+      "internal_only_reason": null,
+      "projection_required": true,
+      "projection_not_applicable_reason": null
     },
     {
       "name": "LootTransaction",
       "family": "loot",
       "internal_only": true,
-      "internal_only_reason": "The ordered session correlates confirmations and narration into LootAcquired."
+      "internal_only_reason": "The ordered session correlates confirmations and narration into LootAcquired.",
+      "projection_required": false,
+      "projection_not_applicable_reason": null
     },
     {
       "name": "LootDrops",
       "family": "loot",
       "internal_only": true,
-      "internal_only_reason": "The ordered session deduplicates corpse windows and emits CorpseLootSnapshot."
+      "internal_only_reason": "The ordered session deduplicates corpse windows and emits CorpseLootSnapshot.",
+      "projection_required": false,
+      "projection_not_applicable_reason": null
     },
     {
       "name": "CorpseLootSnapshot",
       "family": "loot",
       "internal_only": false,
-      "internal_only_reason": null
+      "internal_only_reason": null,
+      "projection_required": true,
+      "projection_not_applicable_reason": null
     },
     {
       "name": "LootAcquired",
       "family": "loot",
       "internal_only": false,
-      "internal_only_reason": null
+      "internal_only_reason": null,
+      "projection_required": true,
+      "projection_not_applicable_reason": null
     },
     {
       "name": "Money",
       "family": "items_progression",
       "internal_only": true,
-      "internal_only_reason": "The ordered session normalizes denominations and emits MoneyBalanceUpdated."
+      "internal_only_reason": "The ordered session normalizes denominations and emits MoneyBalanceUpdated.",
+      "projection_required": false,
+      "projection_not_applicable_reason": null
     },
     {
       "name": "MoneyBalanceUpdated",
       "family": "items_progression",
       "internal_only": false,
-      "internal_only_reason": null
+      "internal_only_reason": null,
+      "projection_required": true,
+      "projection_not_applicable_reason": null
     },
     {
       "name": "SimpleMessage",
       "family": "communication_social",
       "internal_only": true,
-      "internal_only_reason": "The ordered session emits ChatMessage with localized-message metadata."
+      "internal_only_reason": "The ordered session emits ChatMessage with localized-message metadata.",
+      "projection_required": false,
+      "projection_not_applicable_reason": null
     },
     {
       "name": "FormattedMessage",
       "family": "communication_social",
       "internal_only": true,
-      "internal_only_reason": "The ordered session emits ChatMessage with localized arguments."
+      "internal_only_reason": "The ordered session emits ChatMessage with localized arguments.",
+      "projection_required": false,
+      "projection_not_applicable_reason": null
     },
     {
       "name": "SpecialMessage",
       "family": "communication_social",
       "internal_only": true,
-      "internal_only_reason": "The ordered session emits ChatMessage after resolving target context."
+      "internal_only_reason": "The ordered session emits ChatMessage after resolving target context.",
+      "projection_required": false,
+      "projection_not_applicable_reason": null
     },
     {
       "name": "LootMessage",
       "family": "communication_social",
       "internal_only": true,
-      "internal_only_reason": "The ordered session emits ChatMessage and feeds LootAcquired correlation."
+      "internal_only_reason": "The ordered session emits ChatMessage and feeds LootAcquired correlation.",
+      "projection_required": false,
+      "projection_not_applicable_reason": null
     },
     {
       "name": "Chat",
       "family": "communication_social",
       "internal_only": true,
-      "internal_only_reason": "The ordered session emits ChatMessage only for authoritative server traffic."
+      "internal_only_reason": "The ordered session emits ChatMessage only for authoritative server traffic.",
+      "projection_required": false,
+      "projection_not_applicable_reason": null
     },
     {
       "name": "ChatMessage",
       "family": "communication_social",
       "internal_only": false,
-      "internal_only_reason": null
+      "internal_only_reason": null,
+      "projection_required": true,
+      "projection_not_applicable_reason": null
     },
     {
       "name": "UcsRecord",
       "family": "communication_social",
       "internal_only": true,
-      "internal_only_reason": "The ordered session repairs the channel name and emits ChatMessage."
+      "internal_only_reason": "The ordered session repairs the channel name and emits ChatMessage.",
+      "projection_required": false,
+      "projection_not_applicable_reason": null
     },
     {
       "name": "BuffList",
       "family": "combat_spells",
       "internal_only": true,
-      "internal_only_reason": "The ordered session diffs the snapshot into BuffAdded, BuffUpdated, and BuffRemoved."
+      "internal_only_reason": "The ordered session diffs the snapshot into BuffAdded, BuffUpdated, and BuffRemoved.",
+      "projection_required": false,
+      "projection_not_applicable_reason": null
     },
     {
       "name": "BuffWire",
       "family": "combat_spells",
       "internal_only": true,
-      "internal_only_reason": "The ordered session resolves owner and caster state into semantic buff events."
+      "internal_only_reason": "The ordered session resolves owner and caster state into semantic buff events.",
+      "projection_required": false,
+      "projection_not_applicable_reason": null
     },
     {
       "name": "BuffAdded",
       "family": "combat_spells",
       "internal_only": false,
-      "internal_only_reason": null
+      "internal_only_reason": null,
+      "projection_required": true,
+      "projection_not_applicable_reason": null
     },
     {
       "name": "BuffUpdated",
       "family": "combat_spells",
       "internal_only": false,
-      "internal_only_reason": null
+      "internal_only_reason": null,
+      "projection_required": true,
+      "projection_not_applicable_reason": null
     },
     {
       "name": "BuffRemoved",
       "family": "combat_spells",
       "internal_only": false,
-      "internal_only_reason": null
+      "internal_only_reason": null,
+      "projection_required": true,
+      "projection_not_applicable_reason": null
     },
     {
       "name": "GroupFollow",
       "family": "communication_social",
       "internal_only": true,
-      "internal_only_reason": "The ordered session applies the membership delta and emits GroupRosterUpdated."
+      "internal_only_reason": "The ordered session applies the membership delta and emits GroupRosterUpdated.",
+      "projection_required": false,
+      "projection_not_applicable_reason": null
     },
     {
       "name": "GroupDisband",
       "family": "communication_social",
       "internal_only": true,
-      "internal_only_reason": "The ordered session applies the departure or reset and emits GroupRosterUpdated."
+      "internal_only_reason": "The ordered session applies the departure or reset and emits GroupRosterUpdated.",
+      "projection_required": false,
+      "projection_not_applicable_reason": null
     },
     {
       "name": "GroupRosterWire",
       "family": "communication_social",
       "internal_only": true,
-      "internal_only_reason": "The ordered session assigns stable slots and emits GroupRosterUpdated."
+      "internal_only_reason": "The ordered session assigns stable slots and emits GroupRosterUpdated.",
+      "projection_required": false,
+      "projection_not_applicable_reason": null
     },
     {
       "name": "GroupRosterUpdated",
       "family": "communication_social",
       "internal_only": false,
-      "internal_only_reason": null
+      "internal_only_reason": null,
+      "projection_required": true,
+      "projection_not_applicable_reason": null
     },
     {
       "name": "DynamicZoneInfo",
       "family": "communication_social",
       "internal_only": true,
-      "internal_only_reason": "The ordered session combines both dynamic-zone halves into DynamicZoneUpdated."
+      "internal_only_reason": "The ordered session combines both dynamic-zone halves into DynamicZoneUpdated.",
+      "projection_required": false,
+      "projection_not_applicable_reason": null
     },
     {
       "name": "DynamicZoneSwitch",
       "family": "communication_social",
       "internal_only": true,
-      "internal_only_reason": "The ordered session combines both dynamic-zone halves into DynamicZoneUpdated."
+      "internal_only_reason": "The ordered session combines both dynamic-zone halves into DynamicZoneUpdated.",
+      "projection_required": false,
+      "projection_not_applicable_reason": null
     },
     {
       "name": "DynamicZoneUpdated",
       "family": "communication_social",
       "internal_only": false,
-      "internal_only_reason": null
+      "internal_only_reason": null,
+      "projection_required": false,
+      "projection_not_applicable_reason": "Dynamic-zone updates maintain host state and have no standalone seq.v1 payload."
     },
     {
       "name": "LevelUpdate",
       "family": "items_progression",
       "internal_only": true,
-      "internal_only_reason": "The ordered session merges level and experience state into final player and progression events."
+      "internal_only_reason": "The ordered session merges level and experience state into final player and progression events.",
+      "projection_required": false,
+      "projection_not_applicable_reason": null
     },
     {
       "name": "EnterWorld",
       "family": "lifecycle",
       "internal_only": false,
-      "internal_only_reason": null
+      "internal_only_reason": null,
+      "projection_required": false,
+      "projection_not_applicable_reason": "Enter-world establishes session identity and has no standalone seq.v1 payload."
     }
   ]
 }
