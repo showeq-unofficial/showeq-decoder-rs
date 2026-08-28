@@ -74,6 +74,24 @@ break from Live's decode stack.
   `--workspace` clean and still break the `test` or `eql` link the daemon
   actually builds. Run the `test`-feature pairing from Commands before
   trusting a change.
+- **The `seq-bridge` `decode_*` FFI is shared but maps per-backend struct
+  fields.** Adding a field to `seq_backend_eql::X` without
+  `seq_decode::X` (or vice versa) compiles here and breaks the other
+  backend's link in CI (`E0609 no field`). After any change to
+  `seq-bridge` or a struct it maps, build all three:
+  `cargo build -p seq-bridge`, `--no-default-features --features
+  backend-test`, `--no-default-features --features backend-eql`. Live
+  carries the field as `0` when it has no wire source (see `class_mask`).
+- **`gen_eqstructs.py all` regenerates live+test only.** eql owns a
+  pinned `bindings.rs` fork; a struct added to `everquest.h` reaches it
+  only via an explicit `gen_eqstructs.py eql <path>`. Structs used purely
+  for C++ size-gating stay out of the ALLOWLIST.
+- **`spawnStruct` equipment field order differs between wire and memory**
+  (wire `[itemId, equip3, equip2, equip1, equip0]` vs `EquipStruct
+  {equip0, equip1, equip2, itemId, equip3}`) — assign field-by-field,
+  never memcpy.
+- **Hand-written variable-length parsers can drift silently on a patch** —
+  bindings-sync only covers struct-based parsers.
 - **`gen_eqstructs.py` can't parse multi-field bitfield groups** on one
   offset line (e.g. `pitch:12, y:19, padding:1`) — it raises `ValueError`.
   Hand-roll those parsers directly on `&[u8]` instead of adding a
