@@ -45,17 +45,18 @@
 use crate::eqstructs::sign_extend;
 use thiserror::Error;
 
-pub const PAYLOAD_LEN: usize = 24;
+pub const PAYLOAD_LEN: usize = 28;
 
 /// Full circle in wire units for [`PlayerSpawnPos::heading`].
 ///
-/// Upstream declares this field 12 bits wide but consumes it as `h2048` — 2048
-/// units per circle, which is what an 11-bit field carries. We keep the 11-bit
-/// read: it is what our own 08/04 measurement pinned (5.77-degree median
-/// against travel bearing over 448 legs, next-best window 25.8) and it agrees
-/// with upstream's *scale* rather than its declared width. Reading 12 bits at a
-/// 2048 scale would double every angle. If a post-patch capture shows headings
-/// wrapping at half a circle, widen to 12 and set this to 4096.
+/// The 08/25 patch moved the facing to bit 160. Upstream declares it
+/// `heading:8` on a 256-step circle and consumes it as `pu->heading & 0xff`;
+/// that is wrong. Measured against travel bearing over 3204 legs from the
+/// 08/25 capture, an 11-bit field on a 2048-step circle scores a **0.63
+/// degree** median, where upstream's 8-bit/256 read scores 95.61 — noise —
+/// and a 12-bit/4096 read scores 69.50. Width and scale are independent:
+/// keep 11 bits at 2048. The field sits in the gap between z and y (bits
+/// 147..171), so 11 bits fit with one spare bit before y at 172.
 pub const HEADING_UNITS: u16 = 2048;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -66,7 +67,7 @@ pub struct PlayerSpawnPos {
     pub x: i32,
     pub y: i32,
     pub z: i32,
-    /// No located field on eql's 24B wire — surfaced as 0.
+    /// No located field on eql's 28B wire — surfaced as 0.
     pub delta_x: i32,
     pub delta_y: i32,
     pub delta_z: i32,
@@ -75,7 +76,7 @@ pub struct PlayerSpawnPos {
     /// daemon currently ignores this; it is decoded so callers that want a
     /// facing don't have to re-derive it.
     pub heading: u16,
-    /// Not carried on eql's 24B wire — surfaced as 0.
+    /// Not carried on eql's 28B wire — surfaced as 0.
     pub delta_heading: i16,
     pub animation: i16,
     pub pitch: u16,
@@ -87,12 +88,14 @@ pub enum PlayerSpawnPosError {
     BadLength(usize),
 }
 
-fn read_u32_le(bytes: &[u8], at: usize) -> u32 {
-    u32::from_le_bytes([bytes[at], bytes[at + 1], bytes[at + 2], bytes[at + 3]])
-}
-
 fn read_u16_le(bytes: &[u8], at: usize) -> u16 {
     u16::from_le_bytes([bytes[at], bytes[at + 1]])
+}
+
+fn read_u64_le(bytes: &[u8], at: usize) -> u64 {
+    let mut b = [0u8; 8];
+    b.copy_from_slice(&bytes[at..at + 8]);
+    u64::from_le_bytes(b)
 }
 
 pub fn parse_player_spawn_pos(bytes: &[u8]) -> Result<PlayerSpawnPos, PlayerSpawnPosError> {
@@ -103,13 +106,20 @@ pub fn parse_player_spawn_pos(bytes: &[u8]) -> Result<PlayerSpawnPos, PlayerSpaw
     let spawn_id = read_u16_le(bytes, 0);
     let spawn_id2 = read_u16_le(bytes, 2);
 
-    // All three coords are the LOW 19 bits of their word as of 08/18 — z @8,
-    // x @16, y @20 (see module doc).
-    let z = sign_extend(read_u32_le(bytes, 8) & 0x7_FFFF, 19);
-    let x = sign_extend(read_u32_le(bytes, 16) & 0x7_FFFF, 19);
-    let y = sign_extend(read_u32_le(bytes, 20) & 0x7_FFFF, 19);
+    // 08/25: the record grew 24 -> 28B and the fields are no longer word
+    // aligned. Map frame, scored against OP_MobUpdate over 423 time-paired
+    // records (median abs error, best vs next-best window):
+    //     map X  bit 74    13.50 vs 106.75
+    //     Z      bit 128    1.50 vs   9.50
+    //     map Y  bit 172   11.38 vs 852.00
+    // Upstream's field named `x` is map X here and their `y` is map Y — this
+    // is the one position struct they do NOT transpose at their call site.
+    let hi = read_u64_le(bytes, 16);
+    let x = sign_extend(((read_u64_le(bytes, 8) >> 10) & 0x7_FFFF) as u32, 19);
+    let z = sign_extend((hi & 0x7_FFFF) as u32, 19);
+    let y = sign_extend(((hi >> 44) & 0x7_FFFF) as u32, 19);
 
-    let heading = ((read_u32_le(bytes, 16) >> 19) & 0x7FF) as u16;
+    let heading = ((hi >> 32) & 0x7FF) as u16;
 
     Ok(PlayerSpawnPos {
         spawn_id,
@@ -133,9 +143,9 @@ mod tests {
 
     #[test]
     fn rejects_wrong_length() {
-        assert!(parse_player_spawn_pos(&[0; 28]).is_err()); // the pre-08/04 size is rejected
-        assert!(parse_player_spawn_pos(&[0; 23]).is_err());
-        assert!(parse_player_spawn_pos(&[0; 25]).is_err());
+        assert!(parse_player_spawn_pos(&[0; 24]).is_err()); // the pre-08/25 size is rejected
+        assert!(parse_player_spawn_pos(&[0; 27]).is_err());
+        assert!(parse_player_spawn_pos(&[0; 29]).is_err());
     }
 
     #[test]
@@ -150,36 +160,51 @@ mod tests {
     // that shifts under a future rearrangement fails loudly instead of reading
     // a plausible number out of the wrong field.
     #[test]
-    fn each_coordinate_reads_from_its_own_word() {
+    fn each_coordinate_reads_from_its_own_field() {
         let mut buf = [0u8; PAYLOAD_LEN];
         buf[0..2].copy_from_slice(&0x1151u16.to_le_bytes()); // spawnId 4433
 
-        // The two words that carry nothing: filled so a parser reading a
-        // coordinate out of either fails instead of returning a plausible 0.
-        buf[4..8].copy_from_slice(&0xFFFF_FFFFu32.to_le_bytes());
-        buf[12..16].copy_from_slice(&0xFFFF_FFFFu32.to_le_bytes());
-
-        // Each coordinate in the low 19 of its word, neighbouring bits all set.
-        buf[8..12].copy_from_slice(&(42u32 | (0x1FFFu32 << 19)).to_le_bytes()); // z = 42
-        buf[16..20].copy_from_slice(&(0x0004_0000u32 | (0x1FFFu32 << 19)).to_le_bytes()); // x = min
-        buf[20..24].copy_from_slice(&(300u32 | (0x1FFFu32 << 19)).to_le_bytes()); // y = 300
+        // Every bit outside the three coordinate fields is set, so a parser
+        // that slips by even one bit reads a wrong value instead of a
+        // plausible 0. x = bit 74, z = bit 128, y = bit 172.
+        let lo = !(0x7_FFFFu64 << 10);
+        buf[8..16].copy_from_slice(&(lo | (300u64 << 10)).to_le_bytes()); // x = 300
+        let hi = !(0x7_FFFFu64 | (0x7_FFFFu64 << 44));
+        buf[16..24].copy_from_slice(&(hi | 42u64 | (0x0004_0000u64 << 44)).to_le_bytes());
         let p = parse_player_spawn_pos(&buf).unwrap();
         assert_eq!(p.spawn_id, 0x1151);
+        assert_eq!(p.x, 300);
         assert_eq!(p.z, 42);
-        assert_eq!(p.x, -262_144);
-        assert_eq!(p.y, 300);
+        assert_eq!(p.y, -262_144); // 19-bit signed minimum
+    }
+
+    // A real 08/25 broadcast whose spawn also appears in OP_MobUpdate at the
+    // same moment. That stream packs the same position in an unrelated layout
+    // and agrees exactly on x, y, z AND heading — which is what pins the
+    // 11-bit heading here: upstream's 8-bit read truncates 1512 to 232.
+    #[test]
+    fn decodes_a_captured_broadcast() {
+        let bytes: [u8; PAYLOAD_LEN] = [
+            0x92, 0x63, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xB0, 0x58, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x51, 0xFF, 0x87, 0x07, 0xE8, 0xC5, 0xEB, 0x7D, 0x00, 0x00, 0x00, 0x00,
+        ];
+        let p = parse_player_spawn_pos(&bytes).unwrap();
+        assert_eq!(p.spawn_id, 25490);
+        // the parser surfaces raw 19-bit values; the daemon applies >> 3
+        assert_eq!((p.x >> 3, p.y >> 3, p.z >> 3), (709, -1065, -22));
+        assert_eq!(p.heading, 1512);
     }
 
     #[test]
-    fn x_and_heading_share_the_word_at_16() {
+    fn heading_is_eleven_bits_between_z_and_y() {
         let mut buf = [0u8; PAYLOAD_LEN];
-        // x = -1 (all 19 bits set) and a quarter-circle heading directly above
-        // it, with the spare top bit set so a sloppy mask would be caught.
-        let quarter = u32::from(HEADING_UNITS) / 4;
-        let w = 0x7_FFFFu32 | (quarter << 19) | (0x1u32 << 31);
-        buf[16..20].copy_from_slice(&w.to_le_bytes());
+        // A quarter-circle heading at bit 160 with every neighbouring bit set:
+        // upstream's 8-bit read would truncate it, and a 12-bit read would
+        // borrow y's low bit. Both fail here.
+        let quarter = u64::from(HEADING_UNITS) / 4;
+        let hi = !(0x7FFu64 << 32) | (quarter << 32);
+        buf[16..24].copy_from_slice(&hi.to_le_bytes());
         let p = parse_player_spawn_pos(&buf).unwrap();
-        assert_eq!(p.x, -1);
         assert_eq!(p.heading, HEADING_UNITS / 4);
         assert!(p.heading < HEADING_UNITS);
     }

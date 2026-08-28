@@ -41,9 +41,9 @@ mod tests {
 
     #[test]
     fn spawn_position_update_layout() {
-        // sanity: bindgen-generated struct must match the 14-byte payload
-        // the EQ wire format gives us.
-        assert_eq!(std::mem::size_of::<spawnPositionUpdate>(), 14);
+        // sanity: the pinned struct must match the 18-byte payload the EQ
+        // wire format gives us (14 before the 08/25 patch widened unk1).
+        assert_eq!(std::mem::size_of::<spawnPositionUpdate>(), 18);
     }
 
     #[test]

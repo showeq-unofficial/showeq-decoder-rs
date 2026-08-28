@@ -85,16 +85,16 @@
 
 use thiserror::Error;
 
-pub const PAYLOAD_LEN: usize = 42;
+pub const PAYLOAD_LEN: usize = 46;
 
 /// Full circle in wire heading units (11-bit field → 2048 steps).
 ///
-/// The facing is the low 11 bits of the u16 at offset 6 (moved from 38 by the
-/// 08/18 patch, per upstream's re-derivation — UNMEASURED here). Scored
-/// against travel bearing over 469 movement legs it lands at a **0.64 degree**
-/// median, and the same field read as a 10/12/13-bit window gives the identical
-/// angle (the extra bits are fractional), which is what fixes the low edge at
-/// bit 0 of @38. A random field would score ~90.
+/// The facing is the low 11 bits of the u16 at offset 22 (moved from 6 by the
+/// 08/25 patch). MEASURED on the 08/25 capture: scored against travel bearing
+/// over 118 movement legs, with the teleport and zone-change steps excluded,
+/// it lands at a **4.11 degree** median. The next-best axis assignment scores
+/// 79.32 and every other field width scores at noise (8-bit 89.15, 10-bit
+/// 92.27, 12-bit 123.15). A random field would score ~90.
 ///
 /// INVERTED like every other heading: `heading_deg(field, 11)`. Read
 /// uninverted it mirrors — a left turn rotates the marker right. Only the
@@ -160,9 +160,14 @@ pub fn parse_player_self_pos(bytes: &[u8]) -> Result<PlayerSelfPos, PlayerSelfPo
     // Axis labels are the map frame's — MobUpdate's / the spawn record's — NOT
     // the breadcrumb's /loc ordering. See the module doc for how the X/Y
     // assignment was settled physically rather than from field labels.
-    let x = read_f32_le(bytes, 10);
+    // 08/25: the record grew 42 -> 46B and X/Y moved. Identified by float-range
+    // separation over 708 records — @18 and @38 span the zone (stdev 564 / 436)
+    // while @10, @14 and @34 sit inside +-2.7, the per-tick velocity magnitude.
+    // The X/Y assignment is pinned physically, not by upstream's labels: a due
+    // SOUTH leg moves @18 alone and a due EAST leg moves @38 alone.
+    let y = read_f32_le(bytes, 18);
     let z = read_f32_le(bytes, 30);
-    let y = read_f32_le(bytes, 38);
+    let x = read_f32_le(bytes, 38);
 
     // The velocity components have NOT been located for this patch and are
     // deliberately surfaced as 0 rather than read from a plausible-looking
@@ -179,7 +184,7 @@ pub fn parse_player_self_pos(bytes: &[u8]) -> Result<PlayerSelfPos, PlayerSelfPo
     // (That recipe is the salvaged half of a July derivation which produced
     // deltaY@6 / deltaX@22 / deltaZ@3; those OFFSETS are dead — this body has
     // been rearranged twice since, on 08/04 and 08/05 — but the method stands.)
-    let heading = read_u16_le(bytes, 6) & 0x7FF;
+    let heading = read_u16_le(bytes, 22) & 0x7FF;
 
     Ok(PlayerSelfPos {
         spawn_id,
@@ -203,43 +208,57 @@ mod tests {
     #[test]
     fn rejects_wrong_length() {
         assert!(parse_player_self_pos(&[0; 38]).is_err()); // the pre-07/29 size is rejected
-        assert!(parse_player_self_pos(&[0; 41]).is_err());
-        assert!(parse_player_self_pos(&[0; 43]).is_err());
+        assert!(parse_player_self_pos(&[0; 45]).is_err());
+        assert!(parse_player_self_pos(&[0; 47]).is_err());
+        // the pre-08/25 size is now rejected
+        assert!(parse_player_self_pos(&[0; 42]).is_err());
     }
 
     // Distinct values per axis, and the offsets each axis VACATED on 08/18 are
     // filled with a decoy — a parser left on the 08/05 layout reads the decoy
     // instead of failing, which is exactly the silent regression to catch.
     #[test]
-    fn parses_floats_x10_z30_y38() {
+    fn parses_floats_y18_z30_x38() {
         let mut buf = [0u8; PAYLOAD_LEN];
-        buf[10..14].copy_from_slice(&654.25f32.to_le_bytes()); // x
+        buf[18..22].copy_from_slice(&941.50f32.to_le_bytes()); // y
         buf[30..34].copy_from_slice(&190.01f32.to_le_bytes()); // z
-        buf[38..42].copy_from_slice(&941.50f32.to_le_bytes()); // y
-        buf[18..22].copy_from_slice(&(-7.0f32).to_le_bytes()); // decoy: 08/05 y
-        buf[22..26].copy_from_slice(&(-7.0f32).to_le_bytes()); // decoy: 08/05 z
+        buf[38..42].copy_from_slice(&654.25f32.to_le_bytes()); // x
+        buf[10..14].copy_from_slice(&(-7.0f32).to_le_bytes()); // decoy: 08/18 x
+        buf[14..18].copy_from_slice(&(-7.0f32).to_le_bytes()); // decoy: a velocity
+        buf[34..38].copy_from_slice(&(-7.0f32).to_le_bytes()); // decoy: a velocity
         let p = parse_player_self_pos(&buf).unwrap();
         assert_eq!(p.x, 654.25);
         assert_eq!(p.y, 941.50);
         assert_eq!(p.z, 190.01);
     }
 
-    // NO captured-packet test for the 08/18 wire yet. The 08/05 one was retired
-    // with the rotation rather than re-pointed: its bytes were recorded off the
-    // previous layout, so re-asserting them under these offsets would only pin
-    // whatever the new reads happen to produce — a test that can never fail and
-    // proves nothing. Record a replacement from the first post-patch capture and
-    // cross-check it against the OP_SelfPos breadcrumb for the same moment, the
-    // way the 08/05 one was pinned (a different opcode with a different
-    // encoding, agreeing to 0.0000 units on all three axes).
+    // A real 08/25 record, pinned the way the 08/05 one was: cross-checked
+    // against the OP_SelfPos breadcrumb sample for the same moment — a
+    // different opcode with a different encoding (17-byte records, floats at
+    // 0/4/8) — agreeing to 0.000000 units on all three axes. That independence
+    // is the point: re-asserting bytes under offsets derived from those same
+    // bytes would pin whatever the parser happens to do and never fail.
+    #[test]
+    fn decodes_a_captured_self_update() {
+        let bytes: [u8; PAYLOAD_LEN] = [
+            0x00, 0x00, 0x16, 0x64, 0x00, 0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0xD0, 0xC5, 0xC3, 0xDC, 0x03, 0xC0, 0x33, 0x00, 0x20,
+            0xF6, 0x7F, 0x00, 0x00, 0x60, 0x3F, 0x00, 0x00, 0x00, 0x00, 0x00, 0xF4, 0x96, 0x44,
+            0x00, 0x24, 0xF6, 0x7F,
+        ];
+        let p = parse_player_self_pos(&bytes).unwrap();
+        assert_eq!(p.spawn_id, 25622);
+        assert_eq!((p.x, p.y, p.z), (1207.625, -395.625, 0.875));
+        assert_eq!(p.heading, 988);
+    }
 
-    // Facing is an 11-bit compass value in the low bits at 6: 0 = N, a quarter
+    // Facing is an 11-bit compass value in the low bits at 22: 0 = N, a quarter
     // circle = E. The neighbouring high bits are set so a sloppy mask is caught.
     #[test]
     fn decodes_the_facing_as_a_compass_value() {
         let mut buf = [0u8; PAYLOAD_LEN];
         let w = (HEADING_UNITS / 4) | (0x1Fu16 << 11);
-        buf[6..8].copy_from_slice(&w.to_le_bytes());
+        buf[22..24].copy_from_slice(&w.to_le_bytes());
         let p = parse_player_self_pos(&buf).unwrap();
         assert_eq!(p.heading, HEADING_UNITS / 4);
         assert!(p.heading < HEADING_UNITS);

@@ -894,36 +894,32 @@ pub fn parse_spawn(b: &[u8]) -> Result<ZoneSpawn, DecodeError> {
     // s->x >> 3, s->z >> 3)`, so their `y` field is world X and their `x` field
     // is world Y. Both halves or neither, same as the 08/06 port.
     //
-    //     w0  pad
-    //     w1  { z:19 low | deltaZ:13 }              -> world Z
-    //     w2  { heading:12 low | padding:20 }
-    //     w3  { y:19 low | deltaY:13 }  (upstream's `y`)  -> world X
-    //     w4  { x:19 low | deltaX:13 }  (upstream's `x`)  -> world Y
-    //     w5  trailing
-    //
-    // Every coordinate is now in the LOW 19 bits of its word; the high-19 z of
-    // the previous layout is gone, and the pad moved from w1 to w0.
-    //
-    // UNVALIDATED LOCALLY — no post-patch capture exists yet, so the 952-record
-    // scoring run against OP_MobUpdate that pinned the 08/06 layout has not been
-    // re-run. IF Z COMES OUT WRONG, test w2's HIGH 19 bits (`w2 >> 13`) first:
-    // that is precisely the disagreement we already found once, upstream naming
-    // a separate z field while Z actually rode the top of the heading word.
-    let _pad = w.u32()?;
-    let w1 = w.u32()?;
-    let _w2 = w.u32()?;
+    // ---- 2026-08-25: rearranged again, and no longer word-aligned. ----
+    // MEASURED against OP_MobUpdate over 115 id-paired records (median abs
+    // error, best vs next-best window) — upstream's layout confirmed exactly,
+    // including their call-site transpose:
+    //     map X   bit 10  (w0 >> 10)   0.00 vs 255.62   (upstream's `y`)
+    //     Z       bit 64  (w2 low)     0.00 vs   4.38
+    //     map Y   bit 108 (w3 >> 12)   0.00 vs 400.62   (upstream's `x`)
+    //     heading bit 96  (w3 low 12)  0.9 deg vs 15.1
+    // Scan this block by dumping the words from THIS walk, never by scanning
+    // the record at a fixed offset: the leading name and trailing title/suffix
+    // strings are both variable-length, so no fixed offset lines up and the
+    // scan returns noise that reads like a failed derivation.
+    let w0 = w.u32()?;
+    let _w1 = w.u32()?;
+    let w2 = w.u32()?;
     let w3 = w.u32()?;
-    let w4 = w.u32()?;
-    let _trail = w.u32()?;
-    let x = pos19_word(w3);
-    let y = pos19_word(w4);
-    let z = pos19_word(w1);
-    // Upstream gives the facing its own word again (w2, 12 bits low) after a
-    // patch with no home for it. Left at 0 until it is measured: the last time
-    // no window scored better than noise against MobUpdate's facing, and a
-    // wrong heading points every spawn in the zone the wrong way, where a zero
-    // one just points them all north.
-    let heading = 0u16;
+    let _w4 = w.u32()?;
+    let _w5 = w.u32()?;
+    let x = pos19_word(w0 >> 10);
+    let y = pos19_word(w3 >> 12);
+    let z = pos19_word(w2);
+    // Heading finally has a measured home (w3 low 12, h2048). 0.9 degree median
+    // against OP_MobUpdate's facing over 115 id-paired records, next-best window
+    // 15.1 — the first time any window has beaten noise here, so it stops being
+    // forced to 0.
+    let heading = (w3 & 0xFFF) as u16;
 
     // Title/suffix string block: 4 strings on ordinary spawns, 6 (title, suffix,
     // then the 4) on titled ones — no reliable presence flag. Anchor on the
@@ -1081,12 +1077,10 @@ pub fn size_overrides() -> Vec<(&'static str, u32)> {
         // slot@0/spellId@4/targetId@18 kept their offsets — the record grew at the
         // tail. Size comes from that parser, not from Live's 39B sizeof.
         ("startCastStruct", start_cast::PAYLOAD_LEN as u32),
-        // eql OP_ClientUpdate S>C other-spawn position broadcast: 19-bit ×8 packed,
-        // x/y in the LOW bits of the @4/@16 words and z in the HIGH bits of @12.
-        // The 2026-08-04 rotation shrank it 28B -> 24B and rearranged the body;
-        // decoded by this crate's own parse_player_spawn_pos, re-derived against
-        // the untouched OP_MobUpdate / OP_NpcMoveUpdate streams — see that module
-        // and OPCODES_LEGENDS.md.
+        // eql OP_ClientUpdate S>C other-spawn position broadcast: 19-bit ×8 packed
+        // at unaligned bit offsets. The 2026-08-25 rotation grew it 24B -> 28B and
+        // rearranged the body; decoded by this crate's own parse_player_spawn_pos,
+        // re-derived against the OP_MobUpdate stream — see that module.
         ("playerSpawnPosStruct", player_spawn_pos::PAYLOAD_LEN as u32),
         // --- De-piggyback (2026-07-10): eql OWNS every mapped SZC_Match gate size ---
         // The daemon's compiled size table is Live's `everquest.h` sizeof. Before
@@ -1172,7 +1166,7 @@ pub fn size_overrides() -> Vec<(&'static str, u32)> {
             core::mem::size_of::<eqstructs::simpleMessageStruct>() as u32,
         ),
         // No pinned eql binding (eql reuses the shared decode) — capture-confirmed size:
-        ("playerSelfPosStruct", player_self_pos::PAYLOAD_LEN as u32), // OP_ClientUpdate C>S self-pos: 42B post-07/29 (was 38B); floats Y@10/X@22/Z@34, spawnId@2, heading@26
+        ("playerSelfPosStruct", player_self_pos::PAYLOAD_LEN as u32), // OP_ClientUpdate C>S self-pos: 46B post-08/25 (was 42B); floats Y@18/Z@30/X@38, spawnId@2, heading@22
         ("altExpUpdateStruct", 12), // OP_AAExpUpdate: u32 altexp, u32 aaUnspent, u32 tail
         // eql door rows are 132B (Live doorStruct is 136B); OP_SpawnDoor gates
         // SZC_Modulus on this and newDoorSpawns strides via door_stride().
@@ -1596,13 +1590,24 @@ mod tests {
         assert!(parse_new_zone(b"short\0").is_err()); // no long name
     }
 
+    #[test]
+    fn new_zone_reads_an_instanced_zone() {
+        let mut b = Vec::new();
+        b.extend_from_slice(b"hateplane_eqlsolo\0");
+        b.extend_from_slice(b"The Plane of Hate\0");
+        b.extend_from_slice(&[0u8; 40]);
+        let z = parse_new_zone(&b).unwrap();
+        assert_eq!(z.short_name, "hateplane_eqlsolo");
+        assert_eq!(z.long_name, "The Plane of Hate");
+    }
+
     // parse_player_self_pos tests live in player_self_pos.rs (the module now owns
     // the canonical parser; these lib.rs copies tested the retired 42B layout).
 
     /// Encode a game-unit coordinate as a wire position word: signed 19-bit
     /// ×8 fixed-point in the low bits.
-    fn pos_word(game_units: i32) -> [u8; 4] {
-        (((game_units * 8) as u32) & 0x7FFFF).to_le_bytes()
+    fn pos19(game_units: i32) -> u32 {
+        ((game_units * 8) as u32) & 0x7FFFF
     }
 
     /// Assemble a full eql zone-spawn payload matching the `fillSpawnStruct`
@@ -1661,18 +1666,17 @@ mod tests {
         u32le(&mut b, 0); // petOwnerId
         b.extend_from_slice(&[0u8; 49]); // npc==1 extra
         b.extend_from_slice(&[0u8; 60]); // equipment (else branch: 20 + 2*5*4)
-                                         // 2026-08-18 position block (upstream `posData` shape + their
-                                         // transposing call site): w0 = pad, w1 low-19 = Z, w2 = heading
-                                         // word, w3 low-19 = X, w4 low-19 = Y, w5 = 0. Building the pad
-                                         // and the heading word as NON-zero values here is deliberate: an
-                                         // earlier bug read a coordinate out of the pad, and a zero-filled
-                                         // one would have let that reading pass.
-        b.extend_from_slice(&(0x1234_5678u32).to_le_bytes()); // w0: pad — deliberately not zero
-        b.extend_from_slice(&pos_word(z)); // w1: Z in the low 19
-        u32le(&mut b, u32::from(heading) & 0xFFF); // w2: heading word (not decoded yet)
-        b.extend_from_slice(&pos_word(x)); // w3: X in the low 19 (upstream's `y`)
-        b.extend_from_slice(&pos_word(y)); // w4: Y in the low 19 (upstream's `x`)
-        u32le(&mut b, 0); // w5 (always 0 on the wire)
+                                         // 2026-08-25 position block: map X @bit10 (w0), Z @bit64 (w2
+                                         // low-19), heading @bit96 (w3 low-12), map Y @bit108 (w3 >> 12).
+                                         // Every bit OUTSIDE those four fields is deliberately set: an
+                                         // earlier bug read a coordinate out of a pad word, and a
+                                         // zero-filled filler would have let that reading pass.
+        u32le(&mut b, 0x3FF | (pos19(x) << 10) | (0x7u32 << 29)); // w0: pad10 | X | pad3
+        u32le(&mut b, 0xFFFF_FFFF); // w1: pad — deliberately not zero
+        u32le(&mut b, pos19(z) | (0x1FFFu32 << 19)); // w2: Z in the low 19, rest set
+        u32le(&mut b, (u32::from(heading) & 0xFFF) | (pos19(y) << 12) | (1u32 << 31)); // w3
+        u32le(&mut b, 0xFFFF_FFFF); // w4: pad
+        u32le(&mut b, 0xFFFF_FFFF); // w5: pad
         text(&mut b, title);
         text(&mut b, suffix);
         text(&mut b, ""); // string 3
@@ -1715,9 +1719,10 @@ mod tests {
         assert_eq!(s.x, 10);
         assert_eq!(s.y, -15);
         assert_eq!(s.z, 80);
-        // The facing no longer survives the 07/28 position block; it is
-        // reported as 0 rather than read from the bits that now hold Y.
-        assert_eq!(s.heading, 0);
+        // 08/25 gave the facing a measured home again (w3 low 12, h2048); the
+        // surrounding pad bits are all set, so a wrong width or offset here
+        // reads a corrupted angle rather than a plausible one.
+        assert_eq!(s.heading, 1234);
         // titled spawn: title then suffix out of the tail-anchored string block
         assert_eq!(s.title, "Protector");
         assert_eq!(s.suffix, "of Qeynos");

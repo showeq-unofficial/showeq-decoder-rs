@@ -133,13 +133,17 @@ impl<'a> BitStream<'a> {
 }
 
 pub fn parse_npc_move_update(bytes: &[u8]) -> Result<NpcMoveUpdate, NpcMoveUpdateError> {
-    if bytes.len() < 13 || bytes.len() > 24 {
+    if bytes.len() < 16 || bytes.len() > 24 {
         return Err(NpcMoveUpdateError::BadLength(bytes.len()));
     }
     let mut s = BitStream::new(bytes);
 
     let spawn_id = s.read_uint(16) as u16;
-    let _garbage = s.read_uint(16);
+    // 08/25: this lead field widened 16 -> 32 bits, shifting everything after
+    // it by 16. Confirmed against OP_MobUpdate over 304 time-paired records:
+    // median error 0.00 on all three axes with the shift, 8396 / 4568 / 2115
+    // without it. Field ORDER is unchanged, so our map-frame naming stands.
+    let _garbage = s.read_uint(32);
     let field_specifier = s.read_uint(6) as u8;
 
     let y = (s.read_int(19) >> 3) as i16;
@@ -225,12 +229,10 @@ mod tests {
 
     #[test]
     fn parses_minimum_packet_no_optional_fields() {
-        // Build 13 bytes: spawnId=0x4321, garbage=0, fs=0,
-        // y=0, x=0, z=0, heading=0.
-        // Total bits = 16+16+6+19+19+19+12 = 107 bits → 13.375 → 14 bytes
-        // Hmm, 107/8 = 13.375 → 14 bytes minimum. Let me recompute:
-        // 16+16+6+19+19+19+12 = 107. ceil(107/8) = 14.
-        let mut buf = [0u8; 14];
+        // spawnId=0x4321, lead=0, fs=0, y=0, x=0, z=0, heading=0.
+        // 16 + 32 + 6 + 19 + 19 + 19 + 12 = 123 bits -> 16 bytes, which is
+        // also the length floor: under 16 the fixed block cannot fit.
+        let mut buf = [0u8; 16];
         buf[0] = 0x43;
         buf[1] = 0x21;
         let r = parse_npc_move_update(&buf).unwrap();
