@@ -180,6 +180,8 @@ pub enum DecodeError {
     Short(usize),
     #[error("unexpected payload length: {0} bytes")]
     BadLength(usize),
+    #[error("{0} is not plausible text")]
+    Implausible(&'static str),
 }
 
 // Little-endian scalar reads at a byte offset. Callers length-guard first, so
@@ -642,8 +644,8 @@ fn walk_profile_skills(b: &[u8], prof: &mut PlayerProfile) {
 /// BIND zone (identical across zones); that opcode is not OP_NewZone and is no
 /// longer decoded here.
 pub fn parse_new_zone(b: &[u8]) -> Result<NewZone, DecodeError> {
-    // short_name @0, long_name after its NUL. Two packed C-strings name the zone
-    // + drive the map; the binary tail (safe point, exp mult, …) is unused.
+    // short_name @0, long_name after its NUL; the binary tail is unused. `latin1`
+    // maps ANY byte to a char, so the names are gated before World latches them.
     let n0 = b
         .iter()
         .position(|&c| c == 0)
@@ -656,9 +658,17 @@ pub fn parse_new_zone(b: &[u8]) -> Result<NewZone, DecodeError> {
         .iter()
         .position(|&c| c == 0)
         .ok_or(DecodeError::Short(b.len()))?;
+    let short_name = latin1(&b[..n0]);
+    let long_name = latin1(&rest[..n1]);
+    if !new_zone::plausible(&short_name, 64) {
+        return Err(DecodeError::Implausible("short_name"));
+    }
+    if !new_zone::plausible(&long_name, 128) {
+        return Err(DecodeError::Implausible("long_name"));
+    }
     Ok(NewZone {
-        short_name: latin1(&b[..n0]),
-        long_name: latin1(&rest[..n1]),
+        short_name,
+        long_name,
         ..Default::default()
     })
 }
@@ -1588,6 +1598,18 @@ mod tests {
     fn new_zone_rejects_unterminated() {
         assert!(parse_new_zone(b"noterminator").is_err());
         assert!(parse_new_zone(b"short\0").is_err()); // no long name
+    }
+
+    #[test]
+    fn new_zone_rejects_names_of_raw_bytes() {
+        // Shape World actually latched live: latin1 turns any byte into a valid
+        // String, so the plausibility gate is the only thing that can reject it.
+        let mut b = vec![0x5c, 0xfa, 0x27, 0x1b, 0xf2, 0xc2, 0xcd, 0x83, 0x00];
+        b.extend_from_slice(b"The Plane of Hate\0");
+        assert_eq!(
+            parse_new_zone(&b),
+            Err(DecodeError::Implausible("short_name"))
+        );
     }
 
     #[test]

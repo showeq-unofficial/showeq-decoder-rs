@@ -55,7 +55,7 @@ pub enum NewZoneError {
 /// blunt: printable ASCII only, and bounded. It cannot save a wrong payload that happens to
 /// contain plausible text, but it turns the common case from silent corruption into a
 /// rejected packet.
-fn plausible(name: &str, max: usize) -> bool {
+pub(crate) fn plausible(name: &str, max: usize) -> bool {
     // Empty is structurally legal and harmless — a well-formed packet may carry no text,
     // and an empty zone name is not a zone RENAMED to nonsense. Only text that is present
     // and made of non-printable bytes is the failure this rejects.
