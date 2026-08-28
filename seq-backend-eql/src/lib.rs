@@ -1696,7 +1696,10 @@ mod tests {
         u32le(&mut b, 0x3FF | (pos19(x) << 10) | (0x7u32 << 29)); // w0: pad10 | X | pad3
         u32le(&mut b, 0xFFFF_FFFF); // w1: pad — deliberately not zero
         u32le(&mut b, pos19(z) | (0x1FFFu32 << 19)); // w2: Z in the low 19, rest set
-        u32le(&mut b, (u32::from(heading) & 0xFFF) | (pos19(y) << 12) | (1u32 << 31)); // w3
+        u32le(
+            &mut b,
+            (u32::from(heading) & 0xFFF) | (pos19(y) << 12) | (1u32 << 31),
+        ); // w3
         u32le(&mut b, 0xFFFF_FFFF); // w4: pad
         u32le(&mut b, 0xFFFF_FFFF); // w5: pad
         text(&mut b, title);
