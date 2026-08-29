@@ -2018,3 +2018,24 @@ fn stateful_bridge_sessions_are_isolated_when_interleaved() {
     assert!(!orphan.loot_acquired[0].complete);
     assert_eq!(orphan.loot_acquired[0].timestamp, 21);
 }
+
+#[test]
+fn unknown_cxx_enum_values_do_not_panic() {
+    let registry = session_protocol_registry_new("").unwrap();
+    let bogus = ffi::SessionBackend { repr: 42 };
+    assert!(session_new(&registry, bogus).is_err());
+    assert_eq!(registry.content_hash(bogus), "");
+
+    let mut session = session_new(&registry, linked_session_backend()).unwrap();
+    let batch = session.decode(
+        ffi::SessionStream { repr: 9 },
+        1,
+        ffi::SessionDirection::ServerToClient,
+        &[],
+        0,
+    );
+    assert!(batch.disposition == ffi::SessionDisposition::Malformed);
+    assert!(batch.events.is_empty());
+    let batch = session.flush(ffi::SessionFlushReason { repr: 9 });
+    assert!(batch.disposition == ffi::SessionDisposition::Malformed);
+}

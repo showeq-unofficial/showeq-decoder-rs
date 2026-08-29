@@ -39,6 +39,7 @@ fn session(backend: BackendId, first_opcode: u16) -> Session {
         backend,
         protocol_registry: registry,
     })
+    .expect("backend linked")
 }
 
 #[cfg(any(feature = "backend-live", feature = "backend-test"))]

@@ -76,9 +76,9 @@ pub struct SelfIdentity {
 }
 
 enum BackendSession {
-    #[cfg(any(feature = "backend-live", feature = "backend-test"))]
+    #[cfg(feature = "backend-live")]
     Live(LiveBackend),
-    #[cfg(any(feature = "backend-live", feature = "backend-test"))]
+    #[cfg(feature = "backend-test")]
     Test(LiveBackend),
     #[cfg(feature = "backend-eql")]
     Eql(Box<EqlSession>),
@@ -98,8 +98,13 @@ impl BackendSession {
             Self::Eql(state) => {
                 state.observe_event(event, opcode_name, direction, payload, timestamp)
             }
-            #[cfg(any(feature = "backend-live", feature = "backend-test"))]
-            Self::Live(_) | Self::Test(_) => {
+            #[cfg(feature = "backend-live")]
+            Self::Live(_) => {
+                let _ = (event, opcode_name, direction, payload, timestamp);
+                Vec::new()
+            }
+            #[cfg(feature = "backend-test")]
+            Self::Test(_) => {
                 let _ = (event, opcode_name, direction, payload, timestamp);
                 Vec::new()
             }
@@ -316,21 +321,27 @@ fn i64_to_i32(value: i64) -> i32 {
     value.clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32
 }
 
+/// Errors from building a [`Session`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum SessionError {
+    #[error("backend {0} is not linked into seq-session")]
+    BackendNotLinked(BackendId),
+}
+
 impl Session {
-    pub fn new(config: SessionConfig) -> Self {
+    pub fn new(config: SessionConfig) -> Result<Self, SessionError> {
         let decoder = match config.backend {
-            #[cfg(any(feature = "backend-live", feature = "backend-test"))]
+            #[cfg(feature = "backend-live")]
             BackendId::Live => BackendSession::Live(LiveBackend),
-            // Test currently shares Live's wire decoder. Its opcode catalog is
-            // still independent, so a patch-day ID rotation cannot cross over.
-            #[cfg(any(feature = "backend-live", feature = "backend-test"))]
+            // Test shares Live's wire decoder but keeps its own opcode catalog.
+            #[cfg(feature = "backend-test")]
             BackendId::Test => BackendSession::Test(LiveBackend),
             #[cfg(feature = "backend-eql")]
             BackendId::Eql => BackendSession::Eql(Box::default()),
             #[allow(unreachable_patterns)]
-            unsupported => panic!("backend {unsupported} is not linked into seq-session"),
+            unsupported => return Err(SessionError::BackendNotLinked(unsupported)),
         };
-        Self {
+        Ok(Self {
             backend: config.backend,
             protocol_registry: config.protocol_registry,
             decoder,
@@ -344,7 +355,7 @@ impl Session {
                 group_slots: vec![None; MAX_GROUP_PEERS],
                 ..CommunicationState::default()
             },
-        }
+        })
     }
 
     pub const fn backend(&self) -> BackendId {
@@ -382,10 +393,10 @@ impl Session {
         };
 
         let decoded = match &mut self.decoder {
-            #[cfg(any(feature = "backend-live", feature = "backend-test"))]
-            BackendSession::Live(backend) | BackendSession::Test(backend) => {
-                backend.decode(opcode_name, direction, payload)
-            }
+            #[cfg(feature = "backend-live")]
+            BackendSession::Live(backend) => backend.decode(opcode_name, direction, payload),
+            #[cfg(feature = "backend-test")]
+            BackendSession::Test(backend) => backend.decode(opcode_name, direction, payload),
             #[cfg(feature = "backend-eql")]
             BackendSession::Eql(state) => state.decoder.decode(opcode_name, direction, payload),
         };
@@ -497,8 +508,7 @@ impl Session {
                 alt_id: state.self_tracker.alt_id(),
                 provisional_id: state.self_tracker.provisional_id(),
             },
-            #[cfg(any(feature = "backend-live", feature = "backend-test"))]
-            BackendSession::Live(_) | BackendSession::Test(_) => SelfIdentity::default(),
+            #[allow(unreachable_patterns)]
             _ => SelfIdentity::default(),
         }
     }
@@ -508,8 +518,10 @@ impl Session {
     pub fn take_self_stats(&mut self) -> Vec<SelfStat> {
         match &mut self.decoder {
             BackendSession::Eql(state) => std::mem::take(&mut state.self_stats),
-            #[cfg(any(feature = "backend-live", feature = "backend-test"))]
-            BackendSession::Live(_) | BackendSession::Test(_) => Vec::new(),
+            #[cfg(feature = "backend-live")]
+            BackendSession::Live(_) => Vec::new(),
+            #[cfg(feature = "backend-test")]
+            BackendSession::Test(_) => Vec::new(),
         }
     }
 
@@ -518,8 +530,10 @@ impl Session {
     pub fn take_loot_rows(&mut self) -> Vec<LootRow> {
         match &mut self.decoder {
             BackendSession::Eql(state) => std::mem::take(&mut state.loot_rows),
-            #[cfg(any(feature = "backend-live", feature = "backend-test"))]
-            BackendSession::Live(_) | BackendSession::Test(_) => Vec::new(),
+            #[cfg(feature = "backend-live")]
+            BackendSession::Live(_) => Vec::new(),
+            #[cfg(feature = "backend-test")]
+            BackendSession::Test(_) => Vec::new(),
         }
     }
 
@@ -2145,8 +2159,10 @@ impl Session {
                 state.self_stats.clear();
                 state.finish_loot_rows(rows)
             }
-            #[cfg(any(feature = "backend-live", feature = "backend-test"))]
-            BackendSession::Live(_) | BackendSession::Test(_) => Vec::new(),
+            #[cfg(feature = "backend-live")]
+            BackendSession::Live(_) => Vec::new(),
+            #[cfg(feature = "backend-test")]
+            BackendSession::Test(_) => Vec::new(),
         };
         events.extend(decoder_events);
         events
@@ -2588,6 +2604,38 @@ fn batch(generation: ProtocolGeneration, decoded: Decoded) -> DecodeBatch {
     }
 }
 
+#[cfg(test)]
+mod backend_link_tests {
+    use super::*;
+
+    fn unlinked(backend: BackendId) {
+        let err = Session::new(SessionConfig {
+            backend,
+            protocol_registry: Arc::new(ProtocolRegistry::embedded().unwrap()),
+        })
+        .err();
+        assert_eq!(err, Some(SessionError::BackendNotLinked(backend)));
+    }
+
+    #[cfg(not(feature = "backend-live"))]
+    #[test]
+    fn live_not_linked_is_an_error() {
+        unlinked(BackendId::Live);
+    }
+
+    #[cfg(not(feature = "backend-test"))]
+    #[test]
+    fn test_not_linked_is_an_error() {
+        unlinked(BackendId::Test);
+    }
+
+    #[cfg(not(feature = "backend-eql"))]
+    #[test]
+    fn eql_not_linked_is_an_error() {
+        unlinked(BackendId::Eql);
+    }
+}
+
 #[cfg(all(test, feature = "backend-eql"))]
 mod tests {
     use super::*;
@@ -2597,6 +2645,7 @@ mod tests {
             backend: BackendId::Eql,
             protocol_registry: registry,
         })
+        .expect("eql backend linked")
     }
 
     fn self_pos(spawn_id: u16) -> [u8; seq_backend_eql::player_self_pos::PAYLOAD_LEN] {

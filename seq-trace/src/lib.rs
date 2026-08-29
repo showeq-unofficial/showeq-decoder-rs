@@ -284,7 +284,7 @@ pub fn replay(
     let mut session = Session::new(SessionConfig {
         backend,
         protocol_registry: registry,
-    });
+    })?;
     let mut batches = Vec::with_capacity(trace.packets.len());
     for (packet_index, packet) in trace.packets.iter().enumerate() {
         let payload = packet.payload_bytes()?;
@@ -660,6 +660,8 @@ fn decode_hex(source: &str) -> Result<Vec<u8>, TraceError> {
 
 #[derive(Debug, Error)]
 pub enum TraceError {
+    #[error(transparent)]
+    Session(#[from] seq_session::SessionError),
     #[error("could not read {path}: {source}")]
     Read {
         path: PathBuf,

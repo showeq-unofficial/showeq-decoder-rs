@@ -1943,10 +1943,9 @@ fn session_protocol_registry_new(
 
 impl SessionProtocolRegistry {
     fn content_hash(&self, backend: ffi::SessionBackend) -> String {
-        self.0
-            .snapshot(protocol_backend(backend))
-            .content_hash()
-            .to_hex()
+        protocol_backend(backend)
+            .map(|backend| self.0.snapshot(backend).content_hash().to_hex())
+            .unwrap_or_default()
     }
 }
 
@@ -1960,7 +1959,7 @@ fn session_new(
     registry: &SessionProtocolRegistry,
     backend: ffi::SessionBackend,
 ) -> Result<Box<SessionResource>, String> {
-    let backend = protocol_backend(backend);
+    let backend = protocol_backend(backend)?;
     if backend != linked_backend() {
         return Err(format!(
             "seq-bridge was built for {}, not {backend}",
@@ -1971,7 +1970,8 @@ fn session_new(
     let session = seq_session::Session::new(seq_session::SessionConfig {
         backend,
         protocol_registry: std::sync::Arc::clone(&protocol_registry),
-    });
+    })
+    .map_err(|err| err.to_string())?;
     Ok(Box::new(SessionResource {
         session,
         registry: protocol_registry,
@@ -1988,10 +1988,15 @@ impl SessionResource {
         payload: &[u8],
         timestamp: i64,
     ) -> ffi::SessionDecodeBatch {
+        let (Some(stream), Some(direction)) =
+            (protocol_stream(stream), session_direction(direction))
+        else {
+            return self.malformed_batch();
+        };
         let decoded = self.session.decode_at(
-            protocol_stream(stream),
+            stream,
             seq_protocol_data::OpcodeId(opcode_id),
-            session_direction(direction),
+            direction,
             payload,
             timestamp,
         );
@@ -2009,9 +2014,10 @@ impl SessionResource {
         direction: ffi::SessionDirection,
         payload: &[u8],
     ) -> ffi::SessionDecodeBatch {
-        let decoded = self
-            .session
-            .decode_ucs(session_direction(direction), payload);
+        let Some(direction) = session_direction(direction) else {
+            return self.malformed_batch();
+        };
+        let decoded = self.session.decode_ucs(direction, payload);
         let mut batch = translate_events(
             decoded.protocol_generation.0,
             session_disposition(decoded.disposition),
@@ -2021,8 +2027,17 @@ impl SessionResource {
         batch
     }
 
+    // Unknown cxx enum values (open on the C++ side) yield an empty batch, never a panic.
+    fn malformed_batch(&self) -> ffi::SessionDecodeBatch {
+        let generation = self.registry.snapshot(self.backend).generation().0;
+        translate_events(generation, ffi::SessionDisposition::Malformed, Vec::new())
+    }
+
     fn flush(&mut self, reason: ffi::SessionFlushReason) -> ffi::SessionDecodeBatch {
-        let events = self.session.flush(session_flush_reason(reason));
+        let Some(reason) = session_flush_reason(reason) else {
+            return self.malformed_batch();
+        };
+        let events = self.session.flush(reason);
         let generation = self.registry.snapshot(self.backend).generation().0;
         let disposition = if events.is_empty() {
             ffi::SessionDisposition::Ignored
@@ -2057,38 +2072,38 @@ fn linked_backend() -> seq_protocol_data::BackendId {
     return seq_protocol_data::BackendId::Eql;
 }
 
-fn protocol_backend(backend: ffi::SessionBackend) -> seq_protocol_data::BackendId {
+fn protocol_backend(backend: ffi::SessionBackend) -> Result<seq_protocol_data::BackendId, String> {
     match backend {
-        ffi::SessionBackend::Live => seq_protocol_data::BackendId::Live,
-        ffi::SessionBackend::Test => seq_protocol_data::BackendId::Test,
-        ffi::SessionBackend::Eql => seq_protocol_data::BackendId::Eql,
-        _ => unreachable!("cxx SessionBackend has no unknown values"),
+        ffi::SessionBackend::Live => Ok(seq_protocol_data::BackendId::Live),
+        ffi::SessionBackend::Test => Ok(seq_protocol_data::BackendId::Test),
+        ffi::SessionBackend::Eql => Ok(seq_protocol_data::BackendId::Eql),
+        other => Err(format!("unknown SessionBackend value {}", other.repr)),
     }
 }
 
-fn protocol_stream(stream: ffi::SessionStream) -> seq_protocol_data::StreamKind {
+fn protocol_stream(stream: ffi::SessionStream) -> Option<seq_protocol_data::StreamKind> {
     match stream {
-        ffi::SessionStream::World => seq_protocol_data::StreamKind::World,
-        ffi::SessionStream::Zone => seq_protocol_data::StreamKind::Zone,
-        _ => unreachable!("cxx SessionStream has no unknown values"),
+        ffi::SessionStream::World => Some(seq_protocol_data::StreamKind::World),
+        ffi::SessionStream::Zone => Some(seq_protocol_data::StreamKind::Zone),
+        _ => None,
     }
 }
 
-fn session_direction(direction: ffi::SessionDirection) -> seq_events::Dir {
+fn session_direction(direction: ffi::SessionDirection) -> Option<seq_events::Dir> {
     match direction {
-        ffi::SessionDirection::ServerToClient => seq_events::Dir::ServerToClient,
-        ffi::SessionDirection::ClientToServer => seq_events::Dir::ClientToServer,
-        _ => unreachable!("cxx SessionDirection has no unknown values"),
+        ffi::SessionDirection::ServerToClient => Some(seq_events::Dir::ServerToClient),
+        ffi::SessionDirection::ClientToServer => Some(seq_events::Dir::ClientToServer),
+        _ => None,
     }
 }
 
-fn session_flush_reason(reason: ffi::SessionFlushReason) -> seq_session::FlushReason {
+fn session_flush_reason(reason: ffi::SessionFlushReason) -> Option<seq_session::FlushReason> {
     match reason {
-        ffi::SessionFlushReason::Shutdown => seq_session::FlushReason::Shutdown,
-        ffi::SessionFlushReason::ZoneTransition => seq_session::FlushReason::ZoneTransition,
-        ffi::SessionFlushReason::ReplayEnd => seq_session::FlushReason::ReplayEnd,
-        ffi::SessionFlushReason::Reset => seq_session::FlushReason::Reset,
-        _ => unreachable!("cxx SessionFlushReason has no unknown values"),
+        ffi::SessionFlushReason::Shutdown => Some(seq_session::FlushReason::Shutdown),
+        ffi::SessionFlushReason::ZoneTransition => Some(seq_session::FlushReason::ZoneTransition),
+        ffi::SessionFlushReason::ReplayEnd => Some(seq_session::FlushReason::ReplayEnd),
+        ffi::SessionFlushReason::Reset => Some(seq_session::FlushReason::Reset),
+        _ => None,
     }
 }
 

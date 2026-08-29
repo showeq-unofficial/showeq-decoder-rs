@@ -324,6 +324,7 @@ dependencies = [
  "seq-backend-live",
  "seq-events",
  "seq-protocol-data",
+ "thiserror",
 ]
 
 [[package]]

@@ -36,6 +36,7 @@ fn session(backend: BackendId, base: u16) -> Session {
         backend,
         protocol_registry: registry,
     })
+    .expect("backend linked")
 }
 
 #[cfg(feature = "backend-eql")]

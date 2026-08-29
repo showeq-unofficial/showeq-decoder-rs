@@ -20,6 +20,7 @@ fn session(backend: BackendId) -> Session {
         backend,
         protocol_registry: registry(backend),
     })
+    .expect("backend linked")
 }
 
 fn enter_world(name: &str) -> [u8; 72] {

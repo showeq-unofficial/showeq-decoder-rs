@@ -132,6 +132,9 @@ transition, and replay end. The returned event batch contains incomplete loot
 meaning before any reset marker, and the same rows remain in the compatibility
 drain.
 
-The selected bridge backend is fixed at build time. `session_new` rejects a
-different `SessionBackend`. Existing opcode-specific functions and standalone
+The selected bridge backend is fixed at build time. `session_new` is
+fallible: it throws a `rust::Error` for a different or unknown
+`SessionBackend`, so call it inside a `try`. `decode`, `decode_ucs`, and
+`flush` are not `Result`; an unknown enum value yields an empty `Malformed`
+batch, but a Rust panic inside them aborts the process. Existing opcode-specific functions and standalone
 EQL trackers remain available during shadow operation.
