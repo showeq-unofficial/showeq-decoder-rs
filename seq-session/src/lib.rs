@@ -1769,6 +1769,7 @@ impl Session {
                 };
                 if membername == self.player_name {
                     self.communication.group_slots.fill(None);
+                    self.communication.group_id = None;
                     self.communication.group_complete = true;
                 } else {
                     for slot in &mut self.communication.group_slots {

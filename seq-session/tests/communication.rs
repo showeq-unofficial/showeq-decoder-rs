@@ -592,3 +592,43 @@ fn eql_ucs_uses_session_channel_state_and_reset() {
     let malformed = session.decode_ucs(Dir::ServerToClient, &[0; 11]);
     assert_eq!(malformed.disposition, DecodeDisposition::Malformed);
 }
+
+fn assert_self_disband_clears_group(backend: BackendId, base: u16) {
+    let mut session = session(backend, base);
+    decode(
+        &mut session,
+        base,
+        ENTER_WORLD,
+        Dir::ClientToServer,
+        &enter_world("Hero"),
+    );
+    decode(
+        &mut session,
+        base,
+        GROUP_LIST,
+        Dir::ServerToClient,
+        &group_list(77, 3, &["Hero", "Alice", "Bob"]),
+    );
+    let left = decode(
+        &mut session,
+        base,
+        GROUP_DISBAND,
+        Dir::ServerToClient,
+        &group_disband(backend, "Hero", "Hero"),
+    );
+    assert!(matches!(
+        left.as_slice(),
+        [Event::GroupDisband { .. }, Event::GroupRosterUpdated(GroupRosterState { group_id: None, members, .. })]
+            if members.is_empty()
+    ));
+}
+
+#[test]
+fn live_self_disband_clears_group_id() {
+    assert_self_disband_clears_group(BackendId::Live, 0x6100);
+}
+
+#[test]
+fn eql_self_disband_clears_group_id() {
+    assert_self_disband_clears_group(BackendId::Eql, 0x6300);
+}
