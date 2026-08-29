@@ -144,7 +144,7 @@ fn assert_live_trace(backend: BackendId) {
         StreamKind::World,
         ENTER_WORLD,
         Dir::ClientToServer,
-        &enter_world("Firona"),
+        &enter_world("Testchar"),
     );
 
     let identity = decode(
@@ -152,7 +152,7 @@ fn assert_live_trace(backend: BackendId) {
         StreamKind::Zone,
         ZONE_ENTRY,
         Dir::ServerToClient,
-        &live_spawn("Firona", 100),
+        &live_spawn("Testchar", 100),
     );
     assert!(matches!(
         identity.as_slice(),
@@ -400,14 +400,14 @@ fn eql_keeps_the_phantom_internal_and_routes_partial_vitals() {
         StreamKind::World,
         ENTER_WORLD,
         Dir::ClientToServer,
-        &enter_world("Firona"),
+        &enter_world("Testchar"),
     );
     decode(
         &mut session,
         StreamKind::Zone,
         ZONE_ENTRY,
         Dir::ServerToClient,
-        &eql_spawn("Firona", 100),
+        &eql_spawn("Testchar", 100),
     );
     assert!(decode(
         &mut session,
@@ -423,7 +423,7 @@ fn eql_keeps_the_phantom_internal_and_routes_partial_vitals() {
             StreamKind::Zone,
             ZONE_ENTRY,
             Dir::ServerToClient,
-            &eql_spawn("Firona", 105),
+            &eql_spawn("Testchar", 105),
         ),
         vec![Event::PlayerVitalsUpdated(PlayerVitals {
             health: Some(VitalValue {

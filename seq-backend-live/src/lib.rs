@@ -1053,11 +1053,11 @@ mod tests {
     #[test]
     fn enter_world_validates_direction_and_identity() {
         let mut payload = [0; 72];
-        payload[..6].copy_from_slice(b"Firona");
+        payload[..8].copy_from_slice(b"Testchar");
         assert_eq!(
             LiveBackend.decode("OP_EnterWorld", Dir::ClientToServer, &payload),
             Decoded::One(Event::EnterWorld {
-                character_name: "Firona".into()
+                character_name: "Testchar".into()
             })
         );
         assert_eq!(

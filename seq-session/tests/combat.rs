@@ -476,7 +476,7 @@ fn eql_numeric_buff_snapshot_orders_removals_before_additions() {
         88,
         &[
             (0, 10, "", 0),
-            (70_001, 50, "Firona", 1),
+            (70_001, 50, "Testchar", 1),
             (99_999, -1, "", 2),
             (u32::MAX, 10, "", 3),
         ],
@@ -490,7 +490,7 @@ fn eql_numeric_buff_snapshot_orders_removals_before_additions() {
         2
     );
 
-    let second = eql_buff_list(88, &[(70_002, 40, "Firona", 1)]);
+    let second = eql_buff_list(88, &[(70_002, 40, "Testchar", 1)]);
     let changed = decode(&mut session, base + BUFF_LIST, Dir::ServerToClient, &second);
     let semantic: Vec<_> = changed
         .iter()

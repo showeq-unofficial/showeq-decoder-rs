@@ -132,7 +132,7 @@ fn eql_numeric_fixture_covers_ordering_dispositions_duplicates_and_boundaries() 
     let base = 0x4100;
     let mut session = session(BackendId::Eql, base);
     let mut enter_world = [0; 72];
-    enter_world[..6].copy_from_slice(b"Firona");
+    enter_world[..8].copy_from_slice(b"Testchar");
     decode_at(
         &mut session,
         base + ENTER_WORLD,

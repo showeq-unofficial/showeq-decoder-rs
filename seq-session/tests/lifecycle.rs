@@ -61,7 +61,7 @@ fn assert_common_lifecycle(backend: BackendId) {
         StreamKind::World,
         OpcodeId(1),
         Dir::ClientToServer,
-        &enter_world("Firona"),
+        &enter_world("Testchar"),
     );
     assert_eq!(
         entered.events,
@@ -70,7 +70,7 @@ fn assert_common_lifecycle(backend: BackendId) {
                 reason: seq_events::SessionResetReason::EnterWorld,
             },
             Event::EnterWorld {
-                character_name: "Firona".into(),
+                character_name: "Testchar".into(),
             },
         ]
     );
@@ -136,7 +136,7 @@ fn live_lifecycle_trace_has_exact_ordered_batches() {
     assert_common_lifecycle(BackendId::Live);
     let mut session = session(BackendId::Live);
     let mut transition = [0; 100];
-    transition[..7].copy_from_slice(b"Firona\0");
+    transition[..9].copy_from_slice(b"Testchar\0");
     transition[64..66].copy_from_slice(&57u16.to_le_bytes());
     transition[66..68].copy_from_slice(&3u16.to_le_bytes());
     let batch = session.decode(
@@ -152,7 +152,7 @@ fn live_lifecycle_trace_has_exact_ordered_batches() {
                 reason: seq_events::SessionResetReason::ZoneTransition,
             },
             Event::ZoneTransition {
-                character_name: "Firona".into(),
+                character_name: "Testchar".into(),
                 zone_id: Some(57),
                 instance_id: Some(3),
                 confirmed: true,

@@ -2752,7 +2752,7 @@ mod tests {
             StreamKind::World,
             OpcodeId(0x0935),
             Dir::ClientToServer,
-            &enter_world("Firona"),
+            &enter_world("Testchar"),
         );
         assert_eq!(session.self_identity(), SelfIdentity::default());
     }
@@ -2781,7 +2781,7 @@ mod tests {
             StreamKind::World,
             OpcodeId(0x0935),
             Dir::ClientToServer,
-            &enter_world("Firona"),
+            &enter_world("Testchar"),
         );
         assert_eq!(
             entered.events,
@@ -2790,7 +2790,7 @@ mod tests {
                     reason: SessionResetReason::EnterWorld,
                 },
                 Event::EnterWorld {
-                    character_name: "Firona".into(),
+                    character_name: "Testchar".into(),
                 },
             ]
         );
@@ -2807,7 +2807,7 @@ mod tests {
             Dir::ClientToServer,
             &self_pos(88),
         );
-        let profile = profile("Firona");
+        let profile = profile("Testchar");
         let decoded = session.apply_session_semantics(
             Decoded::One(Event::PlayerProfile(profile.clone())),
             "OP_PlayerProfile",
@@ -2838,7 +2838,7 @@ mod tests {
                 }),
                 Event::PlayerIdentityUpdated(PlayerIdentity {
                     spawn_id: None,
-                    name: "Firona".into(),
+                    name: "Testchar".into(),
                     last_name: String::new(),
                     race: 3,
                     class_: 1,
@@ -2866,7 +2866,7 @@ mod tests {
     fn profile_progression_snapshot_pairs_and_filters_wire_arrays() {
         let registry = Arc::new(ProtocolRegistry::embedded().unwrap());
         let mut session = eql_session(registry);
-        let mut profile = profile("Firona");
+        let mut profile = profile("Testchar");
         profile.aa_ids = vec![700, 0, 701, 700];
         profile.aa_values = vec![2, 9, 0, 3];
         profile.aa_spent = 99;
@@ -3146,7 +3146,7 @@ mod tests {
     fn corpse_coordinates_follow_entity_kind() {
         for kind in [0, 2, 10] {
             let mut entities = EntityIndex::default();
-            entities.add(99, "Firona", kind);
+            entities.add(99, "Testchar", kind);
             let mut position = seq_events::Point3 {
                 x: 4.25,
                 y: 5.5,
@@ -3179,7 +3179,7 @@ mod tests {
     fn loadout_and_zone_boundaries_keep_identity_semantic() {
         let registry = Arc::new(ProtocolRegistry::embedded().unwrap());
         let mut session = eql_session(registry);
-        let profile = profile("Firona");
+        let profile = profile("Testchar");
         session.apply_session_semantics(
             Decoded::One(Event::PlayerProfile(profile)),
             "OP_PlayerProfile",
@@ -3189,7 +3189,7 @@ mod tests {
         );
         let spawn = seq_events::SpawnInfo {
             id: 500,
-            name: "Firona".into(),
+            name: "Testchar".into(),
             last_name: "Vie".into(),
             race: 1,
             class_: 2,
