@@ -103,7 +103,7 @@ jobs:
       # the symptom would be an eql mis-decode months later. Guard the edge.
       - name: seq-decode must not appear in an EQL consumer dep tree
         run: |
-          for package in seq-bridge seq-trace; do
+          for package in seq-bridge seq-trace seq-session; do
             tree=$(cargo tree -p "$package" --no-default-features --features backend-eql)
             if grep -q 'seq-decode' <<<"$tree"; then
               echo "::error::$package backend-eql pulled in seq-decode — the eql/Live clean break is broken"
