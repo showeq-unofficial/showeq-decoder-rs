@@ -1037,6 +1037,10 @@ impl Session {
                 ]
             }
             Event::ItemSet { items } => {
+                // An empty set is a parse miss, not "you own nothing": keep the cache.
+                if items.is_empty() {
+                    return vec![Event::ItemSet { items }];
+                }
                 let canonical = canonical_inventory(items.clone());
                 let inventory = inventory_map(&canonical);
                 let equipment = equipment_map(&canonical);
@@ -3068,6 +3072,44 @@ mod tests {
         assert_eq!(rows[0].item_name, "Fine Steel Sword");
         assert_eq!(rows[0].corpse_id, 900);
         assert_eq!(rows[0].sequence, 9);
+    }
+
+    #[test]
+    fn empty_item_set_keeps_the_inventory_cache() {
+        let registry = Arc::new(ProtocolRegistry::embedded().unwrap());
+        let mut session = eql_session(registry);
+        let item = seq_events::ItemTemplate {
+            serial: "iGS0000000000001".into(),
+            name: "Worn Item".into(),
+            lore_name: "Worn Item".into(),
+            item_id: 100,
+            icon: None,
+            stack_count: None,
+            weight_tenths: None,
+            flags: None,
+            corruption: None,
+            slot_mask: 0,
+            container_id: 0,
+            container_slot: 5,
+            parent_slot: seq_events::TOP_LEVEL_SLOT,
+            stats: Vec::new(),
+            resists: Vec::new(),
+            hp: 0,
+            mana: 0,
+            endurance: 0,
+            ac: 0,
+        };
+        let seeded = session.apply_progression_semantics(Event::ItemSet { items: vec![item] });
+        assert_eq!(seeded.len(), 3);
+        assert_eq!(session.progression.inventory.len(), 1);
+
+        let emptied = session.apply_progression_semantics(Event::ItemSet { items: Vec::new() });
+        assert!(matches!(
+            emptied.as_slice(),
+            [Event::ItemSet { items }] if items.is_empty()
+        ));
+        assert_eq!(session.progression.inventory.len(), 1);
+        assert_eq!(session.progression.equipment.len(), 1);
     }
 
     #[test]
