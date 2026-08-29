@@ -2694,14 +2694,15 @@ mod tests {
     fn new_zone() -> Vec<u8> {
         let mut payload = Vec::new();
         payload.extend_from_slice(b"qeynos\0South Qeynos\0");
-        payload.extend_from_slice(&[0; 2]);
+        payload.extend_from_slice(&[0u8; 3]);
         payload.extend_from_slice(b"qeynos.eqg\0");
-        payload.extend_from_slice(&[0; 90]);
-        payload.extend_from_slice(&1.25f32.to_le_bytes());
-        payload.extend_from_slice(&[0; 28]);
-        payload.extend_from_slice(&20.5f32.to_le_bytes());
-        payload.extend_from_slice(&10.25f32.to_le_bytes());
-        payload.extend_from_slice(&30.75f32.to_le_bytes());
+        let mut tail = [0u8; 306];
+        tail[5..9].copy_from_slice(&1u32.to_le_bytes());
+        tail[9..13].copy_from_slice(&1.25f32.to_le_bytes());
+        tail[123..127].copy_from_slice(&20.5f32.to_le_bytes());
+        tail[127..131].copy_from_slice(&10.25f32.to_le_bytes());
+        tail[131..135].copy_from_slice(&30.75f32.to_le_bytes());
+        payload.extend_from_slice(&tail);
         payload
     }
 
