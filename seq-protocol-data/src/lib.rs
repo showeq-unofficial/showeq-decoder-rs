@@ -544,7 +544,7 @@ mod tests {
         assert_eq!(
             registry
                 .snapshot(BackendId::Eql)
-                .lookup(StreamKind::Zone, OpcodeId(0x6afc)),
+                .lookup(StreamKind::Zone, OpcodeId(0x206a)),
             Some("OP_PlayerProfile")
         );
         assert_eq!(
@@ -557,7 +557,7 @@ mod tests {
         );
         assert_eq!(
             registry.snapshot(BackendId::Eql).content_hash().to_hex(),
-            "e6f2f9fd46cc2f73d1f508abe217a93f0af0859195e75e1ea04d1c8125170044"
+            "4a71bf832ff4593be648812144aa6b97b002e30325a14c15ed1a0dcae9516fc7"
         );
     }
 
@@ -670,7 +670,7 @@ mod tests {
             assert_eq!(after.generation(), before.generation());
             assert_eq!(after.content_hash(), before.content_hash());
             assert_eq!(
-                after.lookup(StreamKind::Zone, OpcodeId(0x6afc)),
+                after.lookup(StreamKind::Zone, OpcodeId(0x206a)),
                 Some("OP_PlayerProfile")
             );
         }
@@ -727,7 +727,7 @@ mod tests {
         let mut threads = Vec::new();
         for (backend, id, expected) in [
             (BackendId::Live, 0x3635, "OP_PlayerProfile"),
-            (BackendId::Eql, 0x6afc, "OP_PlayerProfile"),
+            (BackendId::Eql, 0x206a, "OP_PlayerProfile"),
         ] {
             let registry = Arc::clone(&registry);
             let barrier = Arc::clone(&barrier);

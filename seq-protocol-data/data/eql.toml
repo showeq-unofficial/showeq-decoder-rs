@@ -79,265 +79,249 @@ id = "fc46"
 name = "OP_WorldComplete"
 
 [[zone]]
-id = "0036"
-name = "OP_GuildMemberUpdate"
-
-[[zone]]
-id = "0295"
-name = "OP_Find"
-
-[[zone]]
-id = "0ad8"
-name = "OP_GroupInvite"
-
-[[zone]]
-id = "0b5e"
-name = "OP_PetButtons"
-
-[[zone]]
-id = "0c0a"
-name = "OP_NewGuildInZone"
-
-[[zone]]
-id = "0c8e"
-name = "OP_ExpUpdate"
-
-[[zone]]
-id = "0d8f"
-name = "OP_CommonMessage"
-
-[[zone]]
-id = "0f68"
-name = "OP_GroupFollow"
-
-[[zone]]
-id = "1134"
-name = "OP_PetBuffList"
-
-[[zone]]
-id = "127b"
-name = "OP_Death"
-
-[[zone]]
-id = "15e1"
-name = "OP_NewZone"
-
-[[zone]]
-id = "16a4"
-name = "OP_RemoveSpawn"
-
-[[zone]]
-id = "18c9"
-name = "OP_AAExpUpdate"
-
-[[zone]]
-id = "1942"
-name = "OP_PetCommands"
-
-[[zone]]
-id = "1aa2"
-name = "OP_FormattedMessage"
-
-[[zone]]
-id = "1c1a"
-name = "OP_SpecialMesg"
-
-[[zone]]
-id = "1ebe"
-name = "OP_Illusion"
-
-[[zone]]
-id = "1ff0"
-name = "OP_SendZonePoints"
-
-[[zone]]
-id = "2251"
-name = "OP_SwapSpell"
-
-[[zone]]
-id = "245f"
-name = "OP_SimpleMessage"
-
-[[zone]]
-id = "26ae"
-name = "OP_GroupDisband"
-
-[[zone]]
-id = "27d6"
-name = "OP_GroupCancelInvite"
-
-[[zone]]
-id = "27ed"
-name = "OP_GroupUpdate"
-
-[[zone]]
-id = "295c"
-name = "OP_SkillUpdate"
-
-[[zone]]
-id = "2960"
-name = "OP_ZoneChange"
-
-[[zone]]
-id = "2d6a"
-name = "OP_PetTarget"
-
-[[zone]]
-id = "2fb3"
-name = "OP_GuildsInZoneList"
-
-[[zone]]
-id = "32fa"
-name = "OP_LevelUpdate"
-
-[[zone]]
-id = "36b4"
-name = "OP_GuildMOTD"
-
-[[zone]]
-id = "36c1"
-name = "OP_Logout"
-
-[[zone]]
-id = "37a8"
-name = "OP_HPUpdate"
-
-[[zone]]
-id = "3955"
-name = "OP_NpcMoveUpdate"
-
-[[zone]]
-id = "3bd2"
-name = "OP_ClickObject"
-
-[[zone]]
-id = "3cca"
-name = "OP_SpawnDoor"
-
-[[zone]]
-id = "40d7"
-name = "OP_SelfPos"
-
-[[zone]]
-id = "416a"
-name = "OP_LootDrops"
-
-[[zone]]
-id = "42cd"
-name = "OP_ClickBuffOff"
-
-[[zone]]
-id = "434f"
-name = "OP_Emote"
-
-[[zone]]
-id = "4754"
-name = "OP_InspectRequest"
-
-[[zone]]
-id = "48f9"
-name = "OP_MoneyUpdate"
-
-[[zone]]
-id = "49d4"
-name = "OP_WearChange"
-
-[[zone]]
-id = "4cfd"
-name = "OP_GroundSpawn"
-
-[[zone]]
-id = "4eed"
-name = "OP_Buff"
-
-[[zone]]
-id = "51bc"
-name = "OP_MobUpdate"
-
-[[zone]]
-id = "51e1"
-name = "OP_TargetMouse"
-
-[[zone]]
-id = "52b1"
-name = "OP_SpawnAppearance"
-
-[[zone]]
-id = "5358"
-name = "OP_SendAATable"
-
-[[zone]]
-id = "55a0"
-name = "OP_Action2"
-
-[[zone]]
-id = "5729"
+id = "0368"
 name = "OP_ZoneEntry"
 
 [[zone]]
-id = "5753"
-name = "OP_ManaChange"
+id = "06ae"
+name = "OP_Logout"
 
 [[zone]]
-id = "582e"
-name = "OP_LoadoutSwap"
+id = "0857"
+name = "OP_Death"
 
 [[zone]]
-id = "5bff"
-name = "OP_TimeOfDay"
+id = "0a09"
+name = "OP_PetButtons"
 
 [[zone]]
-id = "5c0d"
-name = "OP_Action"
+id = "0c1d"
+name = "OP_MoneyUpdate"
 
 [[zone]]
-id = "5c64"
-name = "OP_UpdateAA"
+id = "0f48"
+name = "OP_NewGuildInZone"
 
 [[zone]]
-id = "6097"
+id = "0ff3"
+name = "OP_PetTarget"
+
+[[zone]]
+id = "10ad"
+name = "OP_ClickObject"
+
+[[zone]]
+id = "1223"
+name = "OP_LootDrops"
+
+[[zone]]
+id = "1343"
+name = "OP_PetBuffList"
+
+[[zone]]
+id = "14fa"
 name = "OP_BeginCast"
 
 [[zone]]
-id = "6838"
-name = "OP_GroupDisband2"
+id = "150a"
+name = "OP_AAExpUpdate"
 
 [[zone]]
-id = "6947"
-name = "OP_CastSpell"
-
-[[zone]]
-id = "6987"
-name = "OP_ClientUpdate"
-
-[[zone]]
-id = "6afc"
-name = "OP_PlayerProfile"
-
-[[zone]]
-id = "6ffb"
-name = "OP_BuffList"
-
-[[zone]]
-id = "7040"
-name = "OP_InspectAnswer"
-
-[[zone]]
-id = "74d4"
-name = "OP_LootMessage"
-
-[[zone]]
-id = "77d4"
-name = "OP_FindPersonRequest"
-
-[[zone]]
-id = "7ac1"
-name = "OP_Consider"
-
-[[zone]]
-id = "7ba3"
+id = "1833"
 name = "OP_DeleteSpawn"
 
 [[zone]]
-id = "7e21"
+id = "1c18"
+name = "OP_ClientUpdate"
+
+[[zone]]
+id = "1fd2"
+name = "OP_WearChange"
+
+[[zone]]
+id = "206a"
+name = "OP_PlayerProfile"
+
+[[zone]]
+id = "23be"
+name = "OP_SkillUpdate"
+
+[[zone]]
+id = "27e5"
+name = "OP_SendAATable"
+
+[[zone]]
+id = "281e"
+name = "OP_GroupUpdate"
+
+[[zone]]
+id = "29c0"
+name = "OP_GuildMemberUpdate"
+
+[[zone]]
+id = "2b52"
+name = "OP_SpawnDoor"
+
+[[zone]]
+id = "2c60"
+name = "OP_Action"
+
+[[zone]]
+id = "2cb1"
+name = "OP_SpawnAppearance"
+
+[[zone]]
+id = "2cee"
+name = "OP_HPUpdate"
+
+[[zone]]
+id = "2d83"
+name = "OP_Buff"
+
+[[zone]]
+id = "2dda"
+name = "OP_MobUpdate"
+
+[[zone]]
+id = "2e74"
+name = "OP_TimeOfDay"
+
+[[zone]]
+id = "2f21"
+name = "OP_ClickBuffOff"
+
+[[zone]]
+id = "332d"
+name = "OP_ManaChange"
+
+[[zone]]
+id = "336e"
+name = "OP_SelfPos"
+
+[[zone]]
+id = "3691"
 name = "OP_GuildMemberList"
+
+[[zone]]
+id = "36c2"
+name = "OP_Find"
+
+[[zone]]
+id = "377e"
+name = "OP_BuffList"
+
+[[zone]]
+id = "3b5a"
+name = "OP_LootMessage"
+
+[[zone]]
+id = "3f4b"
+name = "OP_GroupCancelInvite"
+
+[[zone]]
+id = "3f84"
+name = "OP_LootTransaction"
+
+[[zone]]
+id = "4085"
+name = "OP_Emote"
+
+[[zone]]
+id = "40fb"
+name = "OP_SendZonePoints"
+
+[[zone]]
+id = "4155"
+name = "OP_GroupDisband"
+
+[[zone]]
+id = "417a"
+name = "OP_Illusion"
+
+[[zone]]
+id = "4448"
+name = "OP_PetCommands"
+
+[[zone]]
+id = "4671"
+name = "OP_ExpUpdate"
+
+[[zone]]
+id = "4911"
+name = "OP_RemoveSpawn"
+
+[[zone]]
+id = "4a41"
+name = "OP_CommonMessage"
+
+[[zone]]
+id = "4dbe"
+name = "OP_GroundSpawn"
+
+[[zone]]
+id = "514a"
+name = "OP_NewZone"
+
+[[zone]]
+id = "52ef"
+name = "OP_NpcMoveUpdate"
+
+[[zone]]
+id = "595f"
+name = "OP_GuildsInZoneList"
+
+[[zone]]
+id = "59a8"
+name = "OP_SimpleMessage"
+
+[[zone]]
+id = "5f44"
+name = "OP_CastSpell"
+
+[[zone]]
+id = "6004"
+name = "OP_UpdateAA"
+
+[[zone]]
+id = "6492"
+name = "OP_LoadoutSwap"
+
+[[zone]]
+id = "64c3"
+name = "OP_LevelUpdate"
+
+[[zone]]
+id = "65c4"
+name = "OP_SpecialMesg"
+
+[[zone]]
+id = "677b"
+name = "OP_FormattedMessage"
+
+[[zone]]
+id = "6aa2"
+name = "OP_GroupInvite"
+
+[[zone]]
+id = "6bc9"
+name = "OP_GuildMOTD"
+
+[[zone]]
+id = "70a1"
+name = "OP_Action2"
+
+[[zone]]
+id = "7560"
+name = "OP_ZoneChange"
+
+[[zone]]
+id = "756d"
+name = "OP_Consider"
+
+[[zone]]
+id = "7e22"
+name = "OP_TargetMouse"
+
+[[zone]]
+id = "90e4"
+name = "OP_SwapSpell"
