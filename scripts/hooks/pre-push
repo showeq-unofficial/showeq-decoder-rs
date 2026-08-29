@@ -20,7 +20,7 @@ if ! command -v cargo >/dev/null 2>&1; then
     exit 0
 fi
 
-echo "pre-push: Event manifest, bridge mapping, and phase 11 source inventory..."
+echo "pre-push: Event manifest, bridge mapping, and legacy source inventory..."
 python3 tools/event_coverage.py check
 python3 -B -m unittest discover -s tools -p 'test_event_coverage.py'
 

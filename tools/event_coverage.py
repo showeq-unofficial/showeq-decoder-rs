@@ -4,7 +4,7 @@
 The Rust Event enum supplies the names and their order. The adjacent TOML file
 adds family and internal-only policy without duplicating payload definitions.
 This script also checks the mechanical seq-bridge match and inventories the
-legacy bridge calls that phase 11 will eventually remove.
+legacy bridge calls that remain in the hosts.
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ EVENT_SOURCE = ROOT / "seq-events/src/lib.rs"
 METADATA_SOURCE = ROOT / "seq-events/event-metadata.toml"
 MANIFEST = ROOT / "seq-events/event-coverage.json"
 BRIDGE_SOURCE = ROOT / "seq-bridge/src/lib.rs"
-INVENTORY = ROOT / "docs/phase11-source-inventory.json"
+INVENTORY = ROOT / "docs/legacy-source-inventory.json"
 
 FAMILIES = {
     "lifecycle",
@@ -382,7 +382,7 @@ def inventory_data() -> dict[str, object]:
     modules.sort(key=lambda row: (str(row["backend"]), str(row["module"])))
     return {
         "schema_version": 1,
-        "purpose": "Phase 11 deletion inventory. Presence does not authorize deletion before host parity.",
+        "purpose": "Legacy source inventory. Presence does not authorize deletion before host parity.",
         "legacy_bridge_decoder_entrypoints": entrypoints,
         "standalone_bridge_trackers": trackers,
         "legacy_bridge_packet_support_entrypoints": packet_support,

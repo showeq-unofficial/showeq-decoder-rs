@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "purpose": "Phase 11 deletion inventory. Presence does not authorize deletion before host parity.",
+  "purpose": "Legacy source inventory. Presence does not authorize deletion before host parity.",
   "legacy_bridge_decoder_entrypoints": [
     {
       "name": "decode_aa_table_entry",

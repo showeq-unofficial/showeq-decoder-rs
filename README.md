@@ -86,7 +86,7 @@ for the capture-derived trace format and replay commands. The repository does
 not contain packet captures.
 
 See [`docs/event-coverage.md`](docs/event-coverage.md) for the exhaustive Event
-manifest, host coverage declarations, and the phase 11 deletion inventory.
+manifest, host coverage declarations, and legacy-source inventory.
 
 ## License
 

@@ -1,9 +1,9 @@
 # Event coverage
 
-Phase 11 removes packet interpretation from C++ and Elixir only after both
-hosts account for every `seq_events::Event` variant. The files in this
-repository make that audit mechanical. They do not authorize removal of the
-legacy bridge or host fallbacks before capture parity and the planned soak.
+The hosts can remove packet interpretation only after both account for every
+`seq_events::Event` variant. The files in this repository make that audit
+mechanical. They do not authorize removal of the legacy bridge or host
+fallbacks before capture parity and soak testing.
 
 ## Contract files
 
@@ -11,7 +11,7 @@ legacy bridge or host fallbacks before capture parity and the planned soak.
 - `seq-events/event-metadata.toml` assigns each event to a stable family and
   documents wire-shaped variants that are internal to the migration adapter.
 - `seq-events/event-coverage.json` is the generated host-facing manifest.
-- `docs/phase11-source-inventory.json` lists the opcode-specific bridge calls,
+- `docs/legacy-source-inventory.json` lists the opcode-specific bridge calls,
   standalone EQL trackers, and backend decoder modules still in the tree.
 
 Run the checks after changing the Event enum, the bridge match, or the legacy
@@ -54,14 +54,14 @@ manifest supplies their reason. For host-visible events, replace the generated
 `missing` values with the current implementation and add a useful note where
 the choice is not obvious.
 
-Validate a declaration during migration with:
+Validate a declaration with:
 
 ```sh
 python3 path/to/scry-decoder-rs/tools/event_coverage.py \
   check-host docs/event-coverage.toml
 ```
 
-At phase 11 deletion time, add `--strict`. Strict mode rejects every `legacy`
+Use `--strict` before deleting legacy code. Strict mode rejects every `legacy`
 and `missing` value. It also requires a Rust-owned projection for every
 host-visible event. Only variants documented as internal-only in the Event
 manifest may omit projection, so `not_applicable` cannot hide a host projection
@@ -75,11 +75,11 @@ is safe to delete. For example:
 
 ```sh
 jq '.legacy_bridge_decoder_entrypoints[].name' \
-  docs/phase11-source-inventory.json
+  docs/legacy-source-inventory.json
 jq '.standalone_bridge_trackers[]' \
-  docs/phase11-source-inventory.json
+  docs/legacy-source-inventory.json
 jq '.legacy_bridge_packet_support_entrypoints[]' \
-  docs/phase11-source-inventory.json
+  docs/legacy-source-inventory.json
 ```
 
 Regenerate the inventory in the same commit that adds or removes a legacy
