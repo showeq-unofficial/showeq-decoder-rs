@@ -3788,10 +3788,9 @@ fn door_stride() -> usize {
 }
 
 fn decode_mob_update(bytes: &[u8]) -> ffi::MobUpdate {
-    // eql's OP_MobUpdate is byte-identical to Live's spawnPositionUpdate
-    // (14B, packed y:19/z:19/u3:7/x:19/heading:12 fixed-point ×8; verified
-    // 2026-07-08 over 1665 packets — 19-bit sign-fill consistent on every
-    // axis), so every backend shares the Live parser here.
+    // Each compiled backend supplies its own parser. EQL retained the packed
+    // coordinate bits but moved the block from byte 4 to byte 8 on 2026-08-25,
+    // increasing its payload from 14 to 18 bytes.
     match backend::parse_mob_update(bytes) {
         Ok(m) => ffi::MobUpdate {
             spawn_id: m.spawn_id,
@@ -5776,7 +5775,7 @@ mod tests {
 
     #[test]
     fn roundtrip_zero_payload() {
-        let r = decode_mob_update(&[0u8; 14]);
+        let r = decode_mob_update(&[0u8; backend::mob_update::PAYLOAD_LEN]);
         assert!(r.ok);
         assert_eq!(r.spawn_id, 0);
         assert_eq!(r.x, 0);
@@ -5784,7 +5783,7 @@ mod tests {
 
     #[test]
     fn bad_length_returns_ok_false() {
-        let r = decode_mob_update(&[0u8; 13]);
+        let r = decode_mob_update(&[0u8; backend::mob_update::PAYLOAD_LEN - 1]);
         assert!(!r.ok);
     }
 

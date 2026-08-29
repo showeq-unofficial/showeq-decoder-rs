@@ -268,7 +268,7 @@ fn assert_entity_trace(
         }
     }
 
-    let mut movement = [0; 14];
+    let mut movement = vec![0; if backend == BackendId::Eql { 18 } else { 14 }];
     movement[..4].copy_from_slice(&spawn_id.to_le_bytes());
     assert!(matches!(
         decode(&mut session, first_opcode + 1, &movement).as_slice(),

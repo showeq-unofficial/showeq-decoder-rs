@@ -1879,7 +1879,7 @@ fn malformed_fixture() -> (u16, ffi::SessionDirection) {
     #[cfg(feature = "backend-test")]
     return (0xaaed, ffi::SessionDirection::ServerToClient);
     #[cfg(feature = "backend-eql")]
-    return (0x6afc, ffi::SessionDirection::ServerToClient);
+    return (0x206a, ffi::SessionDirection::ServerToClient);
 }
 
 #[cfg(feature = "backend-eql")]
@@ -1921,21 +1921,21 @@ fn stateful_bridge_sessions_are_isolated_when_interleaved() {
     let mut second = session_new(&registry, ffi::SessionBackend::Eql).unwrap();
     let mut first_payload = [0u8; seq_backend_eql::player_self_pos::PAYLOAD_LEN];
     first_payload[2..4].copy_from_slice(&101u16.to_le_bytes());
-    first_payload[10..14].copy_from_slice(&101.0f32.to_le_bytes());
+    first_payload[38..42].copy_from_slice(&101.0f32.to_le_bytes());
     let mut second_payload = [0u8; seq_backend_eql::player_self_pos::PAYLOAD_LEN];
     second_payload[2..4].copy_from_slice(&202u16.to_le_bytes());
-    second_payload[10..14].copy_from_slice(&202.0f32.to_le_bytes());
+    second_payload[38..42].copy_from_slice(&202.0f32.to_le_bytes());
 
     let first_batch = first.decode(
         ffi::SessionStream::Zone,
-        0x6987,
+        0x1c18,
         ffi::SessionDirection::ClientToServer,
         &first_payload,
         10,
     );
     let second_batch = second.decode(
         ffi::SessionStream::Zone,
-        0x6987,
+        0x1c18,
         ffi::SessionDirection::ClientToServer,
         &second_payload,
         11,
@@ -1948,7 +1948,7 @@ fn stateful_bridge_sessions_are_isolated_when_interleaved() {
     first.flush(ffi::SessionFlushReason::Reset);
     let second_again = second.decode(
         ffi::SessionStream::Zone,
-        0x6987,
+        0x1c18,
         ffi::SessionDirection::ClientToServer,
         &second_payload,
         12,

@@ -368,12 +368,12 @@ fn eql_spawn(name: &str, id: u32) -> Vec<u8> {
 }
 
 #[cfg(feature = "backend-eql")]
-fn eql_self_pos(id: u16, x: f32, y: f32, z: f32) -> [u8; 42] {
-    let mut payload = [0; 42];
+fn eql_self_pos(id: u16, x: f32, y: f32, z: f32) -> [u8; 46] {
+    let mut payload = [0; 46];
     payload[2..4].copy_from_slice(&id.to_le_bytes());
-    payload[10..14].copy_from_slice(&x.to_le_bytes());
+    payload[18..22].copy_from_slice(&y.to_le_bytes());
     payload[30..34].copy_from_slice(&z.to_le_bytes());
-    payload[38..42].copy_from_slice(&y.to_le_bytes());
+    payload[38..42].copy_from_slice(&x.to_le_bytes());
     payload
 }
 
