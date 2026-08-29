@@ -1,14 +1,6 @@
 //! Neutral, backend-agnostic decode vocabulary + the backend contract.
-//!
-//! Every server backend (live/test/eql) decodes its own wire format into these
-//! shared types, so the daemon consuming them never learns which server it is
-//! talking to. A backend maps its per-server structs (Live `Spawn` vs eql
-//! `ZoneSpawn`, different heading conventions, …) into one `Event` shape; the
-//! daemon just applies events.
-//!
-//! This crate holds NO wire-decode logic — only the vocabulary, the trait, and
-//! shared neutral math — so a backend depending on it is never coupled to
-//! another server's parsers.
+//! Every backend maps its own wire structs into one `Event` shape; this crate
+//! holds no wire-decode logic, so backends never couple to each other's parsers.
 
 use serde::Serialize;
 
@@ -338,17 +330,8 @@ pub const TOP_LEVEL_SLOT: u16 = 0xFFFF;
 /// Highest worn slot index (Charm..Ammo); above this is inventory/cursor.
 pub const MAX_WORN_SLOT: u16 = 22;
 
-/// One item the character owns (see [`Event::ItemSet`]).
-///
-/// `serial` is a per-INSTANCE id, so two copies of the same item type share an
-/// `item_id` but never a `serial` — key a cache on `item_id` for templates and
-/// on `serial` only when you mean this exact copy.
-///
-/// The stat order was pinned against a real in-game tooltip, NOT inferred: six
-/// of the seven land exactly, and the seventh (CHA) reads one lower because the
-/// tooltip was displaying modified rather than base values. The five resists
-/// keep slot order, since the tooltipped item carries the same value in all
-/// five and nothing yet distinguishes them.
+/// One item the character owns (see [`Event::ItemSet`]). `serial` is
+/// per-instance, `item_id` per-template; stat order was pinned against a tooltip.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ItemTemplate {
     pub serial: String,
@@ -714,20 +697,8 @@ pub enum Event {
     /// Low-level OP_HPUpdate result retained for direct backend callers. A
     /// stateful session emits player or spawn health with final ownership.
     SpawnHp { id: u32, cur: i32, max: i32 },
-    /// One packet of the multiplexed stat-sync channel (eql OP_HPUpdate), which
-    /// carries spawn HP plus the local player's mana/endurance together. Kept as
-    /// ONE event per packet on purpose: splitting it into per-stat events makes a
-    /// consumer emit several near-identical player snapshots for a single packet.
-    ///
-    /// A stateful session owns the self/other split. Direct backend callers may
-    /// still inspect this wire-shaped compatibility variant. Routing rules:
-    ///   * HP is meaningful only when `has_hp && hp_max > 0`. For the self it is
-    ///     real cur/max; for other spawns the narrow form is a percentage.
-    ///   * mana/endurance are the local player's only, and only when `wide` —
-    ///     the narrow form is a u8 percent with a synthesized max of 100, which
-    ///     is useless as a max.
-    ///
-    /// eql has no standalone endurance opcode, so this is its sole endurance feed.
+    /// One eql OP_HPUpdate packet (spawn HP + the self's mana/endurance), kept as
+    /// one event; HP needs `has_hp && hp_max > 0`, mana/endurance need `wide`.
     StatSync {
         spawn_id: u32,
         wide: bool,

@@ -405,11 +405,8 @@ impl Session {
         batch(generation, decoded)
     }
 
-    /// Decode one raw UCS port-9877 payload through this session.
-    ///
-    /// UCS has no application opcode and does not use the world/zone catalog,
-    /// so hosts call this beside the numeric `decode` entry point. It does not
-    /// change remote SEQA framing. Only the EQL backend handles this stream.
+    /// Decode one raw UCS port-9877 payload; UCS has no opcode or catalog, so
+    /// this sits beside `decode`. Only the EQL backend handles it.
     pub fn decode_ucs(&mut self, direction: Direction, payload: &[u8]) -> DecodeBatch {
         let generation = self.protocol_registry.snapshot(self.backend).generation();
         if direction != Dir::ServerToClient {
@@ -472,11 +469,8 @@ impl Session {
         }
     }
 
-    /// Close stateful correlators at a lifecycle boundary.
-    ///
-    /// The returned batch carries any incomplete loot acquisition before the
-    /// reset marker. Compatibility loot rows remain available through the
-    /// separate drain while hosts cut over.
+    /// Close stateful correlators at a lifecycle boundary; incomplete loot
+    /// acquisitions are emitted before the reset marker.
     pub fn flush(&mut self, reason: FlushReason) -> Vec<Event> {
         let interruption_reason = match reason {
             FlushReason::Shutdown => CastInterruptionReason::Shutdown,

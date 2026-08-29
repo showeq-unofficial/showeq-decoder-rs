@@ -201,9 +201,8 @@ mod ffi {
         from_corpse: bool,
         ok: bool,
     }
-    // eql OP_LootMessage: the personal loot narration. item_id/item_name come
-    // off the link header (0/empty when the line carries no item link) and are
-    // authoritative — a consumer never has to recover the item from the prose.
+    // eql OP_LootMessage narration; item_id/item_name come off the link header
+    // (0/empty without a link), so consumers never parse the prose.
     struct LootMessage {
         color: u32,
         text: String,
@@ -211,13 +210,8 @@ mod ffi {
         item_name: String,
         ok: bool,
     }
-    // One compatibility loot row from EqlLootTracker. `source` is "message" (what the
-    // player acquired), "window" (corpse contents) or "coin" (a pile); 0 stands
-    // in for SQL NULL on the id/icon columns. `sequence` is the confirmation's
-    // monotonic counter — the host dedups acquisitions on it, since more than
-    // one recorder may be watching the same capture. New host paths consume
-    // LootAcquired and CorpseLootSnapshot instead. `complete` is false when a
-    // session boundary closed an unmatched narration or confirmation.
+    // Compatibility loot row: `source` is message|window|coin, 0 = SQL NULL, and
+    // hosts dedup on `sequence`. New paths use LootAcquired/CorpseLootSnapshot.
     struct LootRow {
         ts: i64,
         source: String,
