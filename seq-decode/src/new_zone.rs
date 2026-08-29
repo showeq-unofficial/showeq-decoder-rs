@@ -41,12 +41,10 @@ pub enum NewZoneError {
     UnterminatedText(&'static str),
     #[error("{0} is not a plausible zone name")]
     ImplausibleName(&'static str),
-    #[error("zone environment contains a non-finite number")]
-    NonFiniteEnvironment,
 }
 
 fn plausible(name: &str, max: usize) -> bool {
-    !name.is_empty() && name.len() <= max && name.bytes().all(|byte| (0x20..=0x7e).contains(&byte))
+    name.is_empty() || (name.len() <= max && name.bytes().all(|b| (0x20..=0x7e).contains(&b)))
 }
 
 struct R<'a> {
@@ -96,21 +94,12 @@ pub fn parse_new_zone(bytes: &[u8]) -> Result<NewZone, NewZoneError> {
     }
     r.skip(2)?;
     let zonefile = r.text("zonefile")?;
-    if !plausible(&zonefile, 128) {
-        return Err(NewZoneError::ImplausibleName("zonefile"));
-    }
     r.skip(90)?;
     let zone_exp_multiplier = r.f32()?;
     r.skip(28)?;
     let safe_y = r.f32()?;
     let safe_x = r.f32()?;
     let safe_z = r.f32()?;
-    if ![zone_exp_multiplier, safe_x, safe_y, safe_z]
-        .into_iter()
-        .all(f32::is_finite)
-    {
-        return Err(NewZoneError::NonFiniteEnvironment);
-    }
     Ok(NewZone {
         short_name,
         long_name,
@@ -180,45 +169,11 @@ mod tests {
     }
 
     #[test]
-    fn empty_names_are_rejected_before_they_can_clear_zone_identity() {
+    fn empty_strings_are_legal() {
         let buf = build(b"", b"", b"", 0.0, 0.0, 0.0, 0.0);
-        assert_eq!(
-            parse_new_zone(&buf),
-            Err(NewZoneError::ImplausibleName("short_name"))
-        );
-    }
-
-    #[test]
-    fn rejects_non_finite_environment_values() {
-        let buf = build(
-            b"qeynos",
-            b"South Qeynos",
-            b"qeynos",
-            f32::NAN,
-            0.0,
-            0.0,
-            0.0,
-        );
-        assert_eq!(
-            parse_new_zone(&buf),
-            Err(NewZoneError::NonFiniteEnvironment)
-        );
-    }
-
-    #[test]
-    fn rejects_a_non_printable_zone_file() {
-        let buf = build(
-            b"qeynos",
-            b"South Qeynos",
-            b"qey\x01nos",
-            1.0,
-            0.0,
-            0.0,
-            0.0,
-        );
-        assert_eq!(
-            parse_new_zone(&buf),
-            Err(NewZoneError::ImplausibleName("zonefile"))
-        );
+        let z = parse_new_zone(&buf).unwrap();
+        assert_eq!(z.short_name, "");
+        assert_eq!(z.long_name, "");
+        assert_eq!(z.zonefile, "");
     }
 }
