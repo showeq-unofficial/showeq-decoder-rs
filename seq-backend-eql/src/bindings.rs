@@ -27,9 +27,9 @@
 pub struct spawnPositionUpdate {
     /// int16_t spawnId
     pub spawnId: i16,
-    /// uint8_t unk1[2]
-    pub unk1: [u8; 2],
-    /// packed bitfield: y:19 z:19 u3:7 x:19 heading:12 unused2:4
+    /// uint8_t unk1[6] — grew 2 -> 6 on the 08/25 patch, moving the block to byte 8
+    pub unk1: [u8; 6],
+    /// packed bitfield: y:19 z:19 u3:7 x:19 unused2:4 heading:12
     pub _bits: [u8; 10],
 }
 
@@ -832,9 +832,10 @@ impl spawnPositionUpdate {
     /// Bits 45..64 of the packed int64 — X coordinate.
     #[inline]
     pub fn x(&self) -> u64 { (self.lo64() >> 45) & ((1 << 19) - 1) }
-    /// Low 12 bits of the trailing u16 — heading.
+    /// High 12 bits of the trailing u16 — heading. The 4 unused bits lead;
+    /// upstream declares them trailing, which reads the facing 4 bits low.
     #[inline]
-    pub fn heading(&self) -> u64 { (self.hi16() & 0xFFF) as u64 }
+    pub fn heading(&self) -> u64 { ((self.hi16() >> 4) & 0xFFF) as u64 }
     /// High 4 bits of the trailing u16 — signed 4-bit unused field.
     #[inline]
     pub fn unused2(&self) -> i64 {
@@ -846,7 +847,7 @@ impl spawnPositionUpdate {
 #[cfg(test)]
 mod __layout_tests {
     use super::*;
-    #[test] fn spawnPositionUpdate_size() { assert_eq!(core::mem::size_of::<spawnPositionUpdate>(), 14); }
+    #[test] fn spawnPositionUpdate_size() { assert_eq!(core::mem::size_of::<spawnPositionUpdate>(), 18); }
     #[test] fn deleteSpawnStruct_size() { assert_eq!(core::mem::size_of::<deleteSpawnStruct>(), 4); }
     #[test] fn removeSpawnStruct_size() { assert_eq!(core::mem::size_of::<removeSpawnStruct>(), 5); }
     #[test] fn hpNpcUpdateStruct_size() { assert_eq!(core::mem::size_of::<hpNpcUpdateStruct>(), 18); }
