@@ -593,6 +593,7 @@ fn eql_ucs_uses_session_channel_state_and_reset() {
     assert_eq!(malformed.disposition, DecodeDisposition::Malformed);
 }
 
+#[cfg(any(feature = "backend-live", feature = "backend-eql"))]
 fn assert_self_disband_clears_group(backend: BackendId, base: u16) {
     let mut session = session(backend, base);
     decode(
@@ -623,11 +624,13 @@ fn assert_self_disband_clears_group(backend: BackendId, base: u16) {
     ));
 }
 
+#[cfg(feature = "backend-live")]
 #[test]
 fn live_self_disband_clears_group_id() {
     assert_self_disband_clears_group(BackendId::Live, 0x6100);
 }
 
+#[cfg(feature = "backend-eql")]
 #[test]
 fn eql_self_disband_clears_group_id() {
     assert_self_disband_clears_group(BackendId::Eql, 0x6300);
