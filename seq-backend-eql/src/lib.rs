@@ -8,9 +8,10 @@
 //! layouts. `seq-bridge`'s `backend-eql` feature routes every `decode_*` here —
 //! there is no eql → seq-decode edge.
 //!
-//! Cite opcodes by NAME, never by id — EQL rotates ids nearly every patch, and
-//! `scry-cpp/conf/eql/opcodes.toml` is the only map. Retired ids may be
-//! named AS history.
+//! Cite opcodes by NAME, never by id — EQL rotates ids nearly every patch. The
+//! map is `seq-protocol-data/data/eql.toml`; `seq-protocol-data/tools/
+//! import_host_catalogs.py --check` keeps scry-cpp's `conf/eql/opcodes.toml`
+//! in step with it. Retired ids may be named AS history.
 //!
 //! Two kinds of module live here:
 //!   * eql's OWN byte-offset parsers for the opcodes whose Legends wire diverges
