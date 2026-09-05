@@ -17,17 +17,25 @@ crate-type = ["staticlib", "rlib"]
 # points at whichever crate the active feature linked.
 [features]
 default = ["backend-live"]
-backend-live = ["dep:seq-decode", "seq-decode/backend-live"]
-backend-test = ["dep:seq-decode", "seq-decode/backend-test"]
-backend-eql  = ["dep:seq-backend-eql"]
+backend-live = ["dep:seq-decode", "seq-decode/backend-live", "seq-session/backend-live"]
+backend-test = ["dep:seq-decode", "seq-decode/backend-test", "seq-session/backend-test"]
+backend-eql  = ["dep:seq-backend-eql", "seq-session/backend-eql"]
 
 [dependencies]
 cxx.workspace = true
 seq-decode = { workspace = true, default-features = false, optional = true }
 seq-backend-eql = { workspace = true, optional = true }
+seq-events.workspace = true
+seq-protocol-data.workspace = true
+seq-session = { workspace = true, default-features = false }
 
 [build-dependencies]
 cxx-build.workspace = true
+
+[dev-dependencies]
+serde.workspace = true
+serde_json.workspace = true
+syn = { version = "2", features = ["full", "visit"] }
 
 [lints]
 workspace = true

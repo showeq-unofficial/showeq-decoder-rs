@@ -6,10 +6,10 @@
 //! corpse/quantity/coin. A narration is therefore held pending until its
 //! confirmation arrives.
 //!
-//! Hosts drive this instead of each writing their own; see `self_track.rs` for
-//! the same shape.
+//! The ordered `seq-session` owns this tracker. Standalone callers remain only
+//! as compatibility adapters while both hosts cut over to semantic events.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 /// Chat colour EQL puts personal loot narration on (CC_User_Loot).
 pub const LOOT_COLOR: u32 = 286;
@@ -56,6 +56,20 @@ pub struct LootRow {
     /// has none. Hosts dedup acquisitions on it, since daemon and scry both
     /// record the same capture.
     pub sequence: u32,
+    /// `true` when both the narration and confirmation were observed. Corpse
+    /// windows and coin piles are complete in one packet. A boundary flushes
+    /// either unmatched half with this set to `false`.
+    pub complete: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct PendingConfirmation {
+    corpse_id: u32,
+    item_id: u32,
+    quantity: u32,
+    coin_copper: u32,
+    sequence: u32,
+    ts: i64,
 }
 
 /// What a loot narration says happened to the item.
@@ -136,6 +150,12 @@ fn classify_tail(tail: &str) -> Option<(bool, String, u32)> {
     }
     if tail.starts_with(" to create ") {
         return Some((false, "created".to_string(), 0));
+    }
+    if tail == " and destroyed it" {
+        return Some((false, "destroyed".to_string(), 0));
+    }
+    if tail == " and dropped it" || tail == " and dropped it on the ground" {
+        return Some((false, "dropped".to_string(), 0));
     }
     if tail.is_empty() {
         return Some((false, "inventory".to_string(), 0));
@@ -225,13 +245,23 @@ pub struct LootTracker {
     zone_base: String,
     instance: String,
     looter: String,
-    /// Narration awaiting its confirmation.
-    pending: Option<LootRow>,
+    /// Narrations and confirmations can cross in captures. Retain both sides
+    /// in wire order and pair by item id when one is available, then FIFO.
+    pending_messages: VecDeque<LootRow>,
+    pending_confirmations: VecDeque<PendingConfirmation>,
     /// `corpse_id\u{1}item` already recorded from a window, so reopening a
     /// corpse does not double-count.
     seen_window: HashSet<String>,
+    /// Full ordered corpse windows already surfaced as semantic snapshots.
+    seen_window_snapshots: HashSet<String>,
     /// Learned from window rows; backfills a narration that carried no link.
     item_id_by_name: HashMap<String, u32>,
+    /// A nonzero server sequence is authoritative. Sequence-less fixtures use
+    /// all transaction fields plus the capture timestamp as their identity.
+    seen_confirmations: HashSet<String>,
+    /// Suppress a replayed copy of the exact same application message without
+    /// collapsing legitimate repeated acquisitions at different timestamps.
+    seen_messages: HashSet<String>,
 }
 
 impl LootTracker {
@@ -251,11 +281,19 @@ impl LootTracker {
         self.looter = looter.to_string();
     }
 
+    /// Current full zone name, including any EQL instance suffix.
+    pub fn zone(&self) -> &str {
+        &self.zone_short
+    }
+
     /// Zone-in. Flushes any narration that never got its confirmation, so the
     /// row keeps the zone it was looted in.
     pub fn set_zone(&mut self, zone_short: &str) -> Vec<LootRow> {
         let out = self.flush();
         if !zone_short.is_empty() {
+            if self.zone_short != zone_short {
+                self.reset();
+            }
             let (base, instance) = split_zone_instance(zone_short);
             self.zone_short = zone_short.to_string();
             self.zone_base = base;
@@ -280,9 +318,6 @@ impl LootTracker {
         let Some(p) = parse_loot_line(text) else {
             return Vec::new();
         };
-        // A prior narration that never got its confirmation.
-        let out = self.flush();
-
         let name = if item_name.is_empty() {
             p.item.clone()
         } else {
@@ -294,7 +329,12 @@ impl LootTracker {
             self.item_id_by_name.get(&name).copied().unwrap_or(0)
         };
 
-        self.pending = Some(LootRow {
+        let message_key = format!("{ts}\u{1}{item_id}\u{1}{item_name}\u{1}{text}");
+        if !self.seen_messages.insert(message_key) {
+            return Vec::new();
+        }
+
+        let mut row = LootRow {
             ts,
             source: LootSource::Message,
             item_name: name,
@@ -312,8 +352,19 @@ impl LootTracker {
             disposition: p.disposition,
             looter: self.looter.clone(),
             sequence: 0,
-        });
-        out
+            complete: false,
+        };
+        if let Some(index) = matching_confirmation(&self.pending_confirmations, row.item_id) {
+            let confirmation = self
+                .pending_confirmations
+                .remove(index)
+                .expect("matching confirmation index");
+            apply_confirmation(&mut row, confirmation);
+            vec![row]
+        } else {
+            self.pending_messages.push_back(row);
+            Vec::new()
+        }
     }
 
     /// A loot confirmation. `from_corpse` is the coin pile, which names no item
@@ -330,6 +381,15 @@ impl LootTracker {
         sequence: u32,
         ts: i64,
     ) -> Vec<LootRow> {
+        let dedup_key = if sequence != 0 {
+            format!("sequence:{sequence}")
+        } else {
+            format!("fields:{corpse_id}:{item_id}:{quantity}:{coin_copper}:{from_corpse}:{ts}")
+        };
+        if !self.seen_confirmations.insert(dedup_key) {
+            return Vec::new();
+        }
+
         if from_corpse {
             if coin_copper == 0 {
                 return Vec::new();
@@ -352,25 +412,28 @@ impl LootTracker {
                 disposition: "corpse_coin".to_string(),
                 looter: self.looter.clone(),
                 sequence,
+                complete: true,
             }];
         }
-        // Orphan confirmation (no preceding narration) carries no item name, so
-        // there is nothing worth recording.
-        let Some(mut r) = self.pending.take() else {
+
+        let confirmation = PendingConfirmation {
+            corpse_id,
+            item_id,
+            quantity,
+            coin_copper,
+            sequence,
+            ts,
+        };
+        let Some(index) = matching_message(&self.pending_messages, item_id) else {
+            self.pending_confirmations.push_back(confirmation);
             return Vec::new();
         };
-        if item_id != 0 {
-            r.item_id = item_id;
-        }
-        if corpse_id != 0 {
-            r.corpse_id = corpse_id;
-        }
-        if quantity != 0 {
-            r.qty = quantity;
-        }
-        r.money_copper = coin_copper;
-        r.sequence = sequence;
-        vec![r]
+        let mut row = self
+            .pending_messages
+            .remove(index)
+            .expect("matching message index");
+        apply_confirmation(&mut row, confirmation);
+        vec![row]
     }
 
     /// One item from a corpse's loot window: the drop-table view. Dedups per
@@ -415,17 +478,111 @@ impl LootTracker {
             disposition: String::new(),
             looter: self.looter.clone(),
             sequence: 0,
+            complete: true,
         }]
     }
 
-    /// Emit a narration that never received its confirmation. Hosts call this
-    /// at end of stream / shutdown.
-    pub fn flush(&mut self) -> Vec<LootRow> {
-        match self.pending.take() {
-            Some(r) => vec![r],
-            None => Vec::new(),
+    /// Return true once for each distinct ordered corpse-window snapshot.
+    pub fn observe_window_snapshot(
+        &mut self,
+        corpse_id: u32,
+        corpse_name: &str,
+        items: &[seq_events::LootItemInfo],
+    ) -> bool {
+        let mut key = format!("{corpse_id}\u{1}{corpse_name}");
+        for item in items {
+            use std::fmt::Write as _;
+            let _ = write!(
+                key,
+                "\u{1}{}\u{1}{}\u{1}{}",
+                item.item_id, item.icon, item.name
+            );
         }
+        self.seen_window_snapshots.insert(key)
     }
+
+    /// Emit every unmatched half at an ordered boundary. A confirmation-only
+    /// row deliberately retains the authoritative ids, quantity, proceeds,
+    /// sequence, and timestamp even though no narration supplied a name.
+    pub fn flush(&mut self) -> Vec<LootRow> {
+        let mut rows: Vec<_> = self.pending_messages.drain(..).collect();
+        rows.extend(
+            self.pending_confirmations
+                .drain(..)
+                .map(|confirmation| LootRow {
+                    ts: confirmation.ts,
+                    source: LootSource::Message,
+                    item_name: String::new(),
+                    item_id: confirmation.item_id,
+                    icon: 0,
+                    qty: confirmation.quantity.max(1),
+                    mob_name: String::new(),
+                    mob_norm: String::new(),
+                    corpse_id: confirmation.corpse_id,
+                    zone_short: self.zone_short.clone(),
+                    zone_base: self.zone_base.clone(),
+                    instance: self.instance.clone(),
+                    sold: confirmation.coin_copper != 0,
+                    money_copper: confirmation.coin_copper,
+                    disposition: if confirmation.coin_copper == 0 {
+                        String::new()
+                    } else {
+                        "sold".to_string()
+                    },
+                    looter: self.looter.clone(),
+                    sequence: confirmation.sequence,
+                    complete: false,
+                }),
+        );
+        rows.sort_by_key(|row| row.ts);
+        rows
+    }
+}
+
+fn matching_confirmation(
+    confirmations: &VecDeque<PendingConfirmation>,
+    item_id: u32,
+) -> Option<usize> {
+    if item_id != 0 {
+        if let Some(index) = confirmations
+            .iter()
+            .position(|confirmation| confirmation.item_id == item_id)
+        {
+            return Some(index);
+        }
+        return confirmations
+            .iter()
+            .position(|confirmation| confirmation.item_id == 0);
+    }
+    (!confirmations.is_empty()).then_some(0)
+}
+
+fn matching_message(messages: &VecDeque<LootRow>, item_id: u32) -> Option<usize> {
+    if item_id != 0 {
+        if let Some(index) = messages
+            .iter()
+            .position(|message| message.item_id == item_id)
+        {
+            return Some(index);
+        }
+        return messages.iter().position(|message| message.item_id == 0);
+    }
+    (!messages.is_empty()).then_some(0)
+}
+
+fn apply_confirmation(row: &mut LootRow, confirmation: PendingConfirmation) {
+    if confirmation.item_id != 0 {
+        row.item_id = confirmation.item_id;
+    }
+    if confirmation.corpse_id != 0 {
+        row.corpse_id = confirmation.corpse_id;
+    }
+    if confirmation.quantity != 0 {
+        row.qty = confirmation.quantity;
+    }
+    row.money_copper = confirmation.coin_copper;
+    row.sequence = confirmation.sequence;
+    row.complete = true;
 }
 
 #[cfg(test)]
@@ -440,6 +597,9 @@ mod tests {
     const HOARD: &str =
         "You looted a Diamond Dust from an ice giant's corpse and stored it in your Dragon Hoard";
     const CREATED: &str = "You looted a Throwing Boulder from an ice giant diplomat's corpse to create a Throwing Boulder +8";
+    const DROPPED: &str =
+        "You looted a Rusty Sword from a goblin's corpse and dropped it on the ground.";
+    const DESTROYED: &str = "You looted a Rusty Mace from an orc's corpse and destroyed it.";
     const KEPT: &str = "--You have looted a Dragon Bone Bracelet from Lady Vox's corpse.--";
     const KEPT_QTY: &str = "--You have looted 2 Bone Chips from a cracked skeleton's corpse.--";
 
@@ -467,6 +627,8 @@ mod tests {
             (DEPOT, "Bone Chips", "tradeskill depot", 2),
             (HOARD, "Diamond Dust", "Dragon Hoard", 1),
             (CREATED, "Throwing Boulder", "created", 1),
+            (DROPPED, "Rusty Sword", "dropped", 1),
+            (DESTROYED, "Rusty Mace", "destroyed", 1),
             (KEPT, "Dragon Bone Bracelet", "inventory", 1),
             (KEPT_QTY, "Bone Chips", "inventory", 2),
         ] {
@@ -540,6 +702,7 @@ mod tests {
         assert_eq!(r.corpse_id, 18632);
         assert_eq!(r.money_copper, 200);
         assert_eq!(r.sequence, 238);
+        assert!(r.complete);
         assert_eq!(r.zone_base, "permafrost");
         assert_eq!(r.instance, "multi");
         assert!(r.sold);
@@ -567,21 +730,99 @@ mod tests {
     }
 
     #[test]
-    fn an_orphan_confirmation_records_nothing() {
+    fn an_orphan_confirmation_is_incomplete_at_the_boundary() {
         let mut t = tracker_in_zone();
         assert!(t
             .on_loot_transaction(1, 2, 1, 500, false, 9, 100)
             .is_empty());
+        let rows = t.flush();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].item_id, 2);
+        assert_eq!(rows[0].corpse_id, 1);
+        assert_eq!(rows[0].sequence, 9);
+        assert!(!rows[0].complete);
     }
 
     #[test]
-    fn a_second_narration_flushes_the_first() {
+    fn multiple_narrations_wait_and_flush_in_capture_order() {
         let mut t = tracker_in_zone();
         t.on_loot_message(LOOT_COLOR, KEPT, 0, "", 100);
-        let flushed = t.on_loot_message(LOOT_COLOR, HOARD, 0, "", 101);
-        assert_eq!(flushed.len(), 1);
+        assert!(t.on_loot_message(LOOT_COLOR, HOARD, 0, "", 101).is_empty());
+        let flushed = t.flush();
+        assert_eq!(flushed.len(), 2);
         assert_eq!(flushed[0].item_name, "Dragon Bone Bracelet");
-        assert_eq!(t.flush()[0].item_name, "Diamond Dust");
+        assert_eq!(flushed[1].item_name, "Diamond Dust");
+        assert!(flushed.iter().all(|row| !row.complete));
+    }
+
+    #[test]
+    fn confirmation_before_narration_pairs_by_item_id() {
+        let mut t = tracker_in_zone();
+        assert!(t
+            .on_loot_transaction(18_632, 7012, 1, 200, false, 238, 99)
+            .is_empty());
+        let rows = t.on_loot_message(LOOT_COLOR, SOLD_2G, 7012, "Bronze Dagger +1", 100);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].corpse_id, 18_632);
+        assert_eq!(rows[0].sequence, 238);
+        assert_eq!(rows[0].ts, 100);
+        assert!(rows[0].complete);
+    }
+
+    #[test]
+    fn known_item_ids_do_not_cross_pair_when_interleaved() {
+        let mut t = tracker_in_zone();
+        t.on_loot_transaction(1, 7012, 1, 200, false, 1, 90);
+        t.on_loot_transaction(2, 16884, 1, 0, false, 2, 91);
+
+        let diamond = t.on_loot_message(LOOT_COLOR, HOARD, 16884, "Diamond Dust", 100);
+        assert_eq!(diamond[0].corpse_id, 2);
+        let dagger = t.on_loot_message(LOOT_COLOR, SOLD_2G, 7012, "Bronze Dagger +1", 101);
+        assert_eq!(dagger[0].corpse_id, 1);
+    }
+
+    #[test]
+    fn duplicate_messages_confirmations_and_windows_emit_once() {
+        let mut t = tracker_in_zone();
+        t.on_loot_message(LOOT_COLOR, SOLD_2G, 7012, "Bronze Dagger +1", 100);
+        assert!(t
+            .on_loot_message(LOOT_COLOR, SOLD_2G, 7012, "Bronze Dagger +1", 100)
+            .is_empty());
+        assert_eq!(
+            t.on_loot_transaction(18_632, 7012, 1, 200, false, 238, 101)
+                .len(),
+            1
+        );
+        assert!(t
+            .on_loot_transaction(18_632, 7012, 1, 200, false, 238, 102)
+            .is_empty());
+        assert_eq!(
+            t.on_loot_drop_item(18_632, "a goblin", "Rusty Sword", 1, 2, 103)
+                .len(),
+            1
+        );
+        assert!(t
+            .on_loot_drop_item(18_632, "a goblin", "Rusty Sword", 1, 2, 104)
+            .is_empty());
+    }
+
+    #[test]
+    fn reset_discards_all_pairing_and_duplicate_state() {
+        let mut t = tracker_in_zone();
+        t.on_loot_transaction(18_632, 7012, 1, 200, false, 238, 99);
+        t.on_loot_drop_item(18_632, "a goblin", "Rusty Sword", 1, 2, 100);
+        t.reset();
+
+        assert!(t
+            .on_loot_message(LOOT_COLOR, SOLD_2G, 7012, "Bronze Dagger +1", 101)
+            .is_empty());
+        assert_eq!(t.flush().len(), 1, "pre-reset confirmation cannot pair");
+        assert_eq!(
+            t.on_loot_drop_item(18_632, "a goblin", "Rusty Sword", 1, 2, 102)
+                .len(),
+            1,
+            "window duplicate state must not survive"
+        );
     }
 
     #[test]
@@ -610,9 +851,20 @@ mod tests {
     fn zone_change_flushes_with_the_old_zone() {
         let mut t = tracker_in_zone();
         t.on_loot_message(LOOT_COLOR, KEPT, 0, "", 100);
+        t.on_loot_drop_item(1, "a goblin", "Rusty Sword", 2, 3, 100);
+        t.on_loot_transaction(1, 4, 1, 0, false, 42, 100);
+        t.on_loot_message(LOOT_COLOR, HOARD, 0, "", 101);
         let rows = t.set_zone("greatdivide");
         assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0].zone_base, "permafrost");
+        assert!(rows.iter().all(|row| row.zone_base == "permafrost"));
+        assert_eq!(
+            t.on_loot_drop_item(1, "a goblin", "Rusty Sword", 2, 3, 101)
+                .len(),
+            1,
+            "window state must not cross zones"
+        );
+        assert!(t.on_loot_transaction(1, 4, 1, 0, false, 42, 102).is_empty());
+        assert_eq!(t.flush().len(), 1, "sequence state must not cross zones");
     }
 
     #[test]

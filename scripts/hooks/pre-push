@@ -20,6 +20,10 @@ if ! command -v cargo >/dev/null 2>&1; then
     exit 0
 fi
 
+echo "pre-push: Event manifest, bridge mapping, and legacy source inventory..."
+python3 tools/event_coverage.py check
+python3 -B -m unittest discover -s tools -p 'test_event_coverage.py'
+
 # Testing all three backends is the point. `cargo test --workspace` builds every
 # crate with its DEFAULT features, so seq-decode is only ever compiled against
 # seq-structs-live — a struct-mirror or shared-FFI change can pass --workspace
@@ -29,9 +33,17 @@ cargo test --workspace --quiet
 
 echo "pre-push: cargo test seq-decode against the test struct mirror..."
 cargo test -p seq-decode --no-default-features --features backend-test --quiet
+echo "pre-push: cargo test stateful Test session, trace, and bridge..."
+cargo test -p seq-session --no-default-features --features backend-test --quiet
+cargo test -p seq-trace --no-default-features --features backend-test --quiet
+cargo test -p seq-bridge --no-default-features --features backend-test --quiet
 
 echo "pre-push: cargo test seq-backend-eql..."
 cargo test -p seq-backend-eql --quiet
+echo "pre-push: cargo test stateful EQL session, trace, and bridge..."
+cargo test -p seq-session --no-default-features --features backend-eql --quiet
+cargo test -p seq-trace --no-default-features --features backend-eql --quiet
+cargo test -p seq-bridge --no-default-features --features backend-eql --quiet
 
 echo "pre-push: rustfmt..."
 cargo fmt --all -- --check
@@ -43,10 +55,10 @@ cargo fmt --all -- --check
 echo "pre-push: clippy (workspace, backend-live defaults)..."
 cargo clippy --workspace --all-targets --quiet
 echo "pre-push: clippy (backend-test)..."
-cargo clippy -p seq-decode -p seq-bridge \
+cargo clippy -p seq-decode -p seq-session -p seq-trace -p seq-bridge \
     --no-default-features --features backend-test --all-targets --quiet
 echo "pre-push: clippy (backend-eql)..."
-cargo clippy -p seq-bridge \
+cargo clippy -p seq-backend-eql -p seq-session -p seq-trace -p seq-bridge \
     --no-default-features --features backend-eql --all-targets --quiet
 
 # Release is the profile Corrosion links (thin LTO + codegen-units=1).
@@ -59,12 +71,14 @@ done
 # The 2026-07-09 clean break: seq-backend-eql vendors its own parsers so a Live
 # wire patch cannot reach eql. One stray seq-decode dependency re-couples them
 # silently — the symptom would be an eql mis-decode months later.
-TREE="$(cargo tree -p seq-bridge --no-default-features --features backend-eql)"
-if grep -q 'seq-decode' <<<"${TREE}"; then
-    echo "" >&2
-    echo "ERROR: backend-eql pulled in seq-decode — the eql/Live clean break is broken." >&2
-    grep -n 'seq-decode' <<<"${TREE}" >&2
-    exit 1
-fi
+for PACKAGE in seq-bridge seq-trace; do
+    TREE="$(cargo tree -p "${PACKAGE}" --no-default-features --features backend-eql)"
+    if grep -q 'seq-decode' <<<"${TREE}"; then
+        echo "" >&2
+        echo "ERROR: ${PACKAGE} backend-eql pulled in seq-decode — the eql/Live clean break is broken." >&2
+        grep -n 'seq-decode' <<<"${TREE}" >&2
+        exit 1
+    fi
+done
 
 echo "pre-push: all three backends build and test clean; eql stays isolated."

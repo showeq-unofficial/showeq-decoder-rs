@@ -1,17 +1,11 @@
 //! Neutral, backend-agnostic decode vocabulary + the backend contract.
-//!
-//! Every server backend (live/test/eql) decodes its own wire format into these
-//! shared types, so the daemon consuming them never learns which server it is
-//! talking to. A backend maps its per-server structs (Live `Spawn` vs eql
-//! `ZoneSpawn`, different heading conventions, …) into one `Event` shape; the
-//! daemon just applies events.
-//!
-//! This crate holds NO wire-decode logic — only the vocabulary, the trait, and
-//! shared neutral math — so a backend depending on it is never coupled to
-//! another server's parsers.
+//! Every backend maps its own wire structs into one `Event` shape; this crate
+//! holds no wire-decode logic, so backends never couple to each other's parsers.
+
+use serde::Serialize;
 
 /// Packet direction on the wire.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum Dir {
     /// Server → client (spawns, zone, profile, …).
     ServerToClient,
@@ -20,7 +14,7 @@ pub enum Dir {
 }
 
 /// A world position in EQ coordinates; heading already normalized to degrees.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct Pos {
     pub x: i32,
     pub y: i32,
@@ -29,8 +23,79 @@ pub struct Pos {
     pub heading_deg: u16,
 }
 
+/// Velocity components carried by one entity packet, in integer game-world
+/// units. Each component is optional because the compact movement wire may
+/// update only a subset. Absence is a protocol fact; compatibility projectors
+/// decide whether their older public format should emit zero for it.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+pub struct Velocity {
+    pub x: Option<i32>,
+    pub y: Option<i32>,
+    pub z: Option<i32>,
+}
+
+/// One absolute vital value. Some packets carry only the current value, so a
+/// maximum is optional rather than synthesized from a host convention.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct VitalValue {
+    pub current: i32,
+    pub maximum: Option<i32>,
+}
+
+/// A partial update to the local player's combat-resource values.
+///
+/// `None` means that the packet did not carry that resource. Consumers merge
+/// the present fields into their current player snapshot.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+pub struct PlayerVitals {
+    pub health: Option<VitalValue>,
+    pub mana: Option<VitalValue>,
+    pub endurance: Option<VitalValue>,
+}
+
+impl PlayerVitals {
+    pub const fn any(self) -> bool {
+        self.health.is_some() || self.mana.is_some() || self.endurance.is_some()
+    }
+}
+
+/// Current local-player identity fields. `spawn_id` is absent until the
+/// ordered session has resolved the real moving spawn. In particular, an EQL
+/// phantom-twin id is never exposed here.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct PlayerIdentity {
+    pub spawn_id: Option<u32>,
+    pub name: String,
+    pub last_name: String,
+    pub race: u32,
+    pub class_: u32,
+    pub deity: u32,
+    pub level: u32,
+    pub class_mask: u32,
+}
+
+/// A partial local-player appearance update.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+pub struct PlayerAppearance {
+    pub race: Option<u32>,
+    pub gender: Option<u8>,
+    pub animation: Option<u32>,
+}
+
+/// A precise world-space point for packets whose wire coordinates are floats.
+///
+/// Host projectors may round these values for an older public contract. Rust
+/// keeps the decoded coordinates so that compatibility policy does not become
+/// shared game state.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+pub struct Point3 {
+    pub x: f32,
+    pub y: f32,
+    pub z: f32,
+}
+
 /// A spawn (NPC, PC, or corpse) entering the zone.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct SpawnInfo {
     pub id: u32,
     pub name: String,
@@ -53,12 +118,23 @@ pub struct SpawnInfo {
     /// EQL multiclass bitmask (bit N = class N). 0 on non-multiclass wires.
     pub class_mask: u32,
     /// Present when the spawn packet carries position (eql); `None` when
-    /// position arrives separately via movement opcodes (Live).
+    /// the backend cannot locate it reliably.
     pub pos: Option<Pos>,
+    /// Initial per-axis velocity carried by the spawn packet. Live carries all
+    /// three components; eql currently has no validated fields for them.
+    pub velocity: Velocity,
+    /// Initial heading delta carried by the spawn packet.
+    pub delta_heading: Option<i16>,
+    /// Initial movement or pose animation carried by the spawn packet.
+    pub animation: Option<i16>,
+    /// Nine visual equipment model ids in worn-slot order. `None` means that
+    /// this backend did not decode equipment, while `Some([0; 9])` means the
+    /// packet explicitly reported nine empty models.
+    pub equipment_models: Option<[u32; 9]>,
 }
 
 /// The local player's character profile (self identity + vitals).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ProfileInfo {
     pub name: String,
     pub last_name: String,
@@ -73,6 +149,13 @@ pub struct ProfileInfo {
     pub aa_values: Vec<u32>,
     /// Total AA points spent (the profile's `aa_spent`).
     pub aa_spent: u32,
+    /// AA points assigned to abilities. This can differ from `aa_spent` on
+    /// Live because spent points also include consumable abilities.
+    pub aa_assigned: u32,
+    /// AA points ready for the player to spend.
+    pub aa_unspent: u32,
+    /// Progress toward the next AA point, on the 0..100000 wire scale.
+    pub aa_experience: u32,
     /// Learned-skill values, indexed by skill id (eql fills this; Live surfaces
     /// skills by another path, so it's empty there). `0xFFFFFFFF` = the skill is
     /// unavailable to this class; the consumer filters those (and 0) out.
@@ -96,14 +179,38 @@ pub struct ProfileInfo {
 }
 
 /// Zone identity from OP_NewZone.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ZoneInfo {
     pub short_name: String,
     pub long_name: String,
 }
 
+/// Non-identity zone settings carried by `OP_NewZone`.
+///
+/// This is separate from [`ZoneInfo`] because clients can switch maps as soon as
+/// the names arrive, while consumers that do not model safe points or experience
+/// modifiers may explicitly ignore this event.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ZoneEnvironment {
+    pub zone_file: String,
+    pub experience_multiplier: f32,
+    pub safe_x: f32,
+    pub safe_y: f32,
+    pub safe_z: f32,
+}
+
+/// Why the session discarded state that cannot survive a lifecycle boundary.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[repr(u8)]
+pub enum SessionResetReason {
+    EnterWorld = 0,
+    PlayerProfile = 1,
+    ZoneTransition = 2,
+    Explicit = 3,
+}
+
 /// One active-buff entry from an OP_BuffList (belongs to the list's owner spawn).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct BuffEntry {
     pub spell_id: u32,
     /// Server-side remaining duration in ticks; `<= 0` = permanent.
@@ -116,13 +223,94 @@ pub struct BuffEntry {
     pub caster: String,
 }
 
+/// One active spell effect after the ordered session has resolved wire
+/// sentinels and the local player's identity.
+///
+/// Spell names, icons, beneficial flags, and level-scaled durations belong to
+/// host spell databases. The shared event keeps only facts present on the wire.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ActiveBuff {
+    /// The affected spawn. Absent means the session attached before it could
+    /// resolve the local player's spawn id.
+    pub owner_id: Option<u32>,
+    pub spell_id: u32,
+    /// Remaining server ticks. `None` means this wire form carried no duration;
+    /// `Some(value <= 0)` means permanent.
+    pub remaining_ticks: Option<i32>,
+    pub slot: Option<u32>,
+    /// Present when the wire names the caster and the session can resolve that
+    /// name to one unambiguous spawn.
+    pub caster_id: Option<u32>,
+    pub caster_name: Option<String>,
+}
+
+/// Why an in-progress cast ended without a matching action or damage event.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[repr(u8)]
+pub enum CastInterruptionReason {
+    /// The server sent a spell-failure or interruption message.
+    ServerMessage = 0,
+    /// Another cast from the same caster replaced the pending cast.
+    Superseded = 1,
+    /// A zone, profile, enter-world, or explicit reset cleared cast state.
+    SessionReset = 2,
+    /// Replay input ended while the cast remained pending.
+    ReplayEnd = 3,
+    /// The owning host shut down while the cast remained pending.
+    Shutdown = 4,
+}
+
 /// One lootable item on a corpse (OP_LootDrops). `item_id` is parsed from the
 /// item-link header; `icon` is the dragitem-atlas id.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct LootItemInfo {
     pub name: String,
     pub icon: u32,
     pub item_id: u32,
+}
+
+/// A final item or coin acquisition after the ordered session has paired the
+/// loot narration with its transaction confirmation.
+///
+/// `complete` is false at a reset, replay end, or shutdown when only one half
+/// reached the session. Optional ids preserve that distinction without making
+/// a host interpret zero sentinels.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct LootAcquisition {
+    pub timestamp: i64,
+    pub item_name: String,
+    pub item_id: Option<u32>,
+    pub quantity: u32,
+    pub corpse_name: String,
+    pub corpse_name_normalized: String,
+    pub corpse_id: Option<u32>,
+    pub zone_short: String,
+    pub zone_base: String,
+    pub instance: String,
+    pub sold: bool,
+    pub coin_copper: u32,
+    /// `inventory`, `sold`, `created`, `dropped`, `destroyed`, a named storage
+    /// destination, or `corpse_coin`.
+    pub disposition: String,
+    pub looter: String,
+    pub sequence: Option<u32>,
+    pub from_corpse: bool,
+    pub complete: bool,
+}
+
+/// Final meaning of one corpse-loot window after per-corpse duplicate
+/// suppression. Reopening an unchanged corpse emits no second snapshot.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct CorpseLootSnapshot {
+    pub timestamp: i64,
+    pub corpse_id: u32,
+    pub corpse_name: String,
+    pub corpse_name_normalized: String,
+    pub zone_short: String,
+    pub zone_base: String,
+    pub instance: String,
+    pub looter: String,
+    pub items: Vec<LootItemInfo>,
 }
 
 /// One guild present in the zone, from the guild-in-zone opcodes. A spawn's
@@ -130,7 +318,7 @@ pub struct LootItemInfo {
 /// are the sole source of the NAME, so a consumer keys its guild map on the
 /// pair. `server_id` is part of the key, not decoration: ids are only unique
 /// within a guild server.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct GuildInZone {
     pub guild_id: u32,
     pub server_id: u32,
@@ -142,25 +330,29 @@ pub const TOP_LEVEL_SLOT: u16 = 0xFFFF;
 /// Highest worn slot index (Charm..Ammo); above this is inventory/cursor.
 pub const MAX_WORN_SLOT: u16 = 22;
 
-/// One item the character owns (see [`Event::ItemSet`]).
-///
-/// `serial` is a per-INSTANCE id, so two copies of the same item type share an
-/// `item_id` but never a `serial` — key a cache on `item_id` for templates and
-/// on `serial` only when you mean this exact copy.
-///
-/// The stat order was pinned against a real in-game tooltip, NOT inferred: six
-/// of the seven land exactly, and the seventh (CHA) reads one lower because the
-/// tooltip was displaying modified rather than base values. The five resists
-/// keep slot order, since the tooltipped item carries the same value in all
-/// five and nothing yet distinguishes them.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// One item the character owns (see [`Event::ItemSet`]). `serial` is
+/// per-instance, `item_id` per-template; stat order was pinned against a tooltip.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ItemTemplate {
     pub serial: String,
     pub name: String,
     /// Usually equal to `name`; a CONTAINER carries its description here.
     pub lore_name: String,
     pub item_id: u32,
-    pub icon: u32,
+    /// Drag-item atlas id. EQL carries it; the current Live item wrapper does
+    /// not, so absence must not turn into a real icon id of zero.
+    pub icon: Option<u32>,
+    /// Stack size or remaining charges. Present on Live's wrapper and absent
+    /// from the validated EQL bulk records.
+    pub stack_count: Option<u32>,
+    /// Item weight in tenths of a unit. Keeping the integer wire value avoids
+    /// float equality and preserves the exact value through adapters.
+    pub weight_tenths: Option<u32>,
+    /// Live's decoded flag word. EQL has no validated equivalent yet.
+    pub flags: Option<u32>,
+    /// Live's corruption resist. EQL's five decoded resist slots do not expose
+    /// a sixth value, so this remains absent there.
+    pub corruption: Option<i32>,
     /// Standard EQ slot bitmask; 0 = not equippable. This is where the item
     /// COULD go — see `container_id` for where it IS.
     pub slot_mask: u32,
@@ -188,6 +380,83 @@ pub struct ItemTemplate {
     pub ac: i32,
 }
 
+/// A normalized item location. It is copied out separately on move events so
+/// a reducer can vacate the old equipment slot before applying the new item.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct ItemLocation {
+    pub container_id: u32,
+    pub container_slot: u16,
+    pub parent_slot: u16,
+}
+
+impl ItemTemplate {
+    pub const fn location(&self) -> ItemLocation {
+        ItemLocation {
+            container_id: self.container_id,
+            container_slot: self.container_slot,
+            parent_slot: self.parent_slot,
+        }
+    }
+}
+
+/// The carried purse without any host-specific total or display formatting.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct MoneyBalance {
+    pub platinum: u32,
+    pub gold: u32,
+    pub silver: u32,
+    pub copper: u32,
+}
+
+/// One learned skill and its absolute value.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct SkillValue {
+    pub skill_id: u32,
+    pub value: u32,
+}
+
+/// The regular per-level experience bar and the level it belongs to when the
+/// ordered session knows it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct ExperienceProgress {
+    pub experience: u32,
+    pub level: Option<u32>,
+    /// Present only when the same packet reports a level transition.
+    pub previous_level: Option<u32>,
+}
+
+/// One purchased alternate-advancement ability and its absolute rank.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct AlternateAbilityRank {
+    pub ability_id: u32,
+    pub rank: u32,
+}
+
+/// Player AA state from an authoritative profile snapshot.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct AlternateAdvancementSnapshot {
+    pub purchased: Vec<AlternateAbilityRank>,
+    /// EQL does not carry these two counters independently.
+    pub spent_points: Option<u32>,
+    pub assigned_points: Option<u32>,
+    pub unspent_points: u32,
+    pub experience: u32,
+}
+
+/// Incremental AA bar and unspent-point state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct AlternateAdvancementProgress {
+    pub experience: u32,
+    pub unspent_points: u32,
+}
+
+/// One mapping from an AA rank id to its localized title string id.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct AlternateAbilityDefinition {
+    pub ability_id: u32,
+    pub title_string_id: u32,
+}
+
 impl ItemTemplate {
     /// Is this item EQUIPPED? Worn gear is top-level in the possessions
     /// container at a slot inside the worn range — inventory and cursor share
@@ -203,7 +472,7 @@ impl ItemTemplate {
 /// primary (lowest set bit of `class_mask`); `banker`/`alt` are the two flags
 /// split from the wire's packed field. `zone_id` 0 = offline; `last_on` is unix
 /// seconds (0 = never).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct GuildRosterMember {
     pub name: String,
     pub level: u32,
@@ -218,46 +487,218 @@ pub struct GuildRosterMember {
     pub zone_id: u32,
 }
 
+/// Where a final chat line came from. The source matters for projection because
+/// localized server messages still need the host's eqstr table, while all other
+/// forms already carry display text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[repr(u8)]
+pub enum ChatMessageKind {
+    Common = 0,
+    Simple = 1,
+    Formatted = 2,
+    Special = 3,
+    Loot = 4,
+    Ucs = 5,
+}
+
+/// Final chat meaning owned by the ordered session.
+///
+/// `format_id` is present only for simple and formatted server messages. Their
+/// `text` stays empty until a host projector resolves the id against its eqstr
+/// database. Rust still owns channel selection, arguments, link-cleaned direct
+/// text, target-name correlation, UCS channel recovery, spam marking, and
+/// direction de-duplication.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ChatMessage {
+    pub kind: ChatMessageKind,
+    pub channel: u32,
+    pub from: String,
+    pub target: String,
+    pub text: String,
+    pub chat_color: u32,
+    pub channel_name: String,
+    pub format_id: Option<u32>,
+    pub args: Vec<String>,
+}
+
+/// One stable peer slot in the local player's group. The local player is not
+/// included, matching the five-peer seq.v1 contract.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct GroupMember {
+    pub slot: u8,
+    pub name: String,
+    /// Absent when the roster wire carried only a name.
+    pub level: Option<u32>,
+}
+
+/// Current group knowledge after applying a full roster or an incremental
+/// follow/disband packet. `complete` is false after a cold attachment or reset
+/// until the session observes a structurally complete roster.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct GroupRosterState {
+    pub group_id: Option<u32>,
+    pub members: Vec<GroupMember>,
+    pub complete: bool,
+}
+
+/// Current guild roster knowledge. A status delta is merged into the last full
+/// roster before this event is emitted.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct GuildRosterState {
+    pub guild_id: u32,
+    pub members: Vec<GuildRosterMember>,
+    pub complete: bool,
+}
+
+/// The guild message of the day with the roster-correlated guild id.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct GuildMotdState {
+    pub guild_id: u32,
+    pub message: String,
+    pub sender: String,
+}
+
+/// One accumulated guild rank-name entry.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct GuildRankNameEntry {
+    pub rank_index: u32,
+    pub rank_name: String,
+}
+
+/// Current accumulated guild rank-name table, sorted by rank index.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct GuildRankNamesState {
+    pub guild_id: u32,
+    pub ranks: Vec<GuildRankNameEntry>,
+}
+
+/// Current dynamic-zone or expedition state assembled from the independent
+/// info and switch packets.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct DynamicZoneState {
+    pub active: bool,
+    pub zone_id: Option<u16>,
+    pub instance_id: Option<u16>,
+    pub kind: Option<u32>,
+    pub position: Option<Point3>,
+    pub max_players: Option<u32>,
+    pub expedition_name: String,
+    pub leader_name: String,
+    /// True once both the info and switch halves have arrived. An explicit quit
+    /// is complete immediately.
+    pub complete: bool,
+}
+
 /// A single door / static object row from OP_SpawnDoor.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct DoorInfo {
     pub id: u32,
     pub name: String,
-    pub x: i32,
-    pub y: i32,
-    pub z: i32,
+    pub position: Point3,
+    /// Native door heading. Unlike mobile-spawn headings, this field is already
+    /// a float and has not been proven to use the same bit-scaled convention.
+    pub heading: f32,
+    pub incline: u32,
+    pub size: u32,
+    pub open_type: u8,
+    pub state: u8,
+    pub invert_state: u8,
+    /// `None` replaces the wire's `0xffff_ffff` "not a zone line" sentinel.
+    pub zone_point_id: Option<u32>,
+}
+
+/// A ground object or dropped item in its native identity namespace.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct GroundItemInfo {
+    pub id: u32,
+    /// Actor-definition model name. Resolving it to an item display name needs
+    /// the item database and belongs in a host projection or later correlation.
+    pub actor_definition: String,
+    pub position: Point3,
+    /// Native heading when present. EQL ground records carry no heading.
+    pub heading: Option<f32>,
+}
+
+/// One destination trigger from `OP_SendZonePoints`.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ZonePointInfo {
+    /// Wire trigger id. Modern Test records identify the portal by actor name
+    /// instead and therefore leave this absent.
+    pub trigger_id: Option<u32>,
+    /// Test portal/object actor name. Live and EQL counted records do not carry
+    /// one.
+    pub actor_definition: Option<String>,
+    pub position: Point3,
+    pub heading: f32,
+    /// Destination ids are absent from modern Test records. A compatibility
+    /// projector may resolve the actor name, but the shared event does not
+    /// invent zero-valued ids.
+    pub destination_zone_id: Option<u16>,
+    pub destination_instance_id: Option<u16>,
 }
 
 /// A decoded, backend-neutral world event.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub enum Event {
+    /// Stateful correlators were reset before the next event in this batch was
+    /// observed. Hosts must apply this before later events in the batch.
+    SessionReset { reason: SessionResetReason },
+    /// The session resolved or changed the local player's identity. This is
+    /// emitted from profiles, the real self spawn, and EQL loadout swaps.
+    PlayerIdentityUpdated(PlayerIdentity),
+    /// The local player moved. `spawn_id` is absent on an EQL cold attach until
+    /// a name-matched moving spawn appears. The wire's phantom id is internal.
+    PlayerMoved { spawn_id: Option<u32>, pos: Pos },
+    /// One packet changed one or more local-player vital values.
+    PlayerVitalsUpdated(PlayerVitals),
+    /// One non-player spawn's health changed.
+    SpawnHealthUpdated { id: u32, current: i32, maximum: i32 },
+    /// The local player died. A zero wire killer id is represented as absent.
+    PlayerDied { killer_id: Option<u32> },
+    /// A non-player spawn died. The entity remains present as a corpse.
+    SpawnDied { id: u32, killer_id: Option<u32> },
+    /// A non-player spawn changed class, race, or level without changing id.
+    SpawnIdentityUpdated {
+        id: u32,
+        level: u32,
+        class_: u32,
+        race: u32,
+    },
+    /// The local player's visible race, gender, or pose changed.
+    PlayerAppearanceUpdated(PlayerAppearance),
     /// A spawn entered the zone (OP_ZoneEntry).
     SpawnAdded(SpawnInfo),
     /// A spawn moved (OP_MobUpdate / OP_NpcMoveUpdate).
-    SpawnMoved { id: u32, pos: Pos },
+    SpawnMoved {
+        id: u32,
+        pos: Pos,
+        /// Per-axis velocity values present on this movement wire.
+        velocity: Velocity,
+        /// Heading delta present on this movement wire.
+        delta_heading: Option<i16>,
+        /// Movement or pose animation present on this movement wire.
+        animation: Option<i16>,
+    },
     /// A spawn left the zone (OP_RemoveSpawn / OP_DeleteSpawn).
     SpawnRemoved { id: u32 },
-    /// A spawn died (OP_Death). Unlike SpawnRemoved the body stays as a corpse;
-    /// the consumer keeps it in its spawn map. `killer_id` 0 = no killer / self.
-    /// The consumer owns the self-death special case (it knows the player id).
+    /// A spawn changed its server-provided display name. `id` is present when
+    /// the ordered session saw one unambiguous matching spawn first. A
+    /// mid-session attachment or duplicate old names leave it absent rather
+    /// than inventing an id.
+    SpawnRenamed {
+        id: Option<u32>,
+        old_name: String,
+        new_name: String,
+    },
+    /// Low-level OP_Death result retained for direct backend callers. A
+    /// stateful session converts it to [`Event::PlayerDied`] or
+    /// [`Event::SpawnDied`] and converts a zero killer id to `None`.
     SpawnKilled { deceased_id: u32, killer_id: u32 },
-    /// A spawn's health changed (OP_HPUpdate). `max` is real HP for the self and
-    /// a percentage base (100) for other spawns, mirroring the wire.
+    /// Low-level OP_HPUpdate result retained for direct backend callers. A
+    /// stateful session emits player or spawn health with final ownership.
     SpawnHp { id: u32, cur: i32, max: i32 },
-    /// One packet of the multiplexed stat-sync channel (eql OP_HPUpdate), which
-    /// carries spawn HP plus the local player's mana/endurance together. Kept as
-    /// ONE event per packet on purpose: splitting it into per-stat events makes a
-    /// consumer emit several near-identical player snapshots for a single packet.
-    ///
-    /// The consumer owns the self/other split — it knows the player id and this
-    /// crate is stateless. Routing rules, mirroring the daemon:
-    ///   * HP is meaningful only when `has_hp && hp_max > 0`. For the self it is
-    ///     real cur/max; for other spawns the narrow form is a percentage.
-    ///   * mana/endurance are the local player's only, and only when `wide` —
-    ///     the narrow form is a u8 percent with a synthesized max of 100, which
-    ///     is useless as a max.
-    ///
-    /// eql has no standalone endurance opcode, so this is its sole endurance feed.
+    /// One eql OP_HPUpdate packet (spawn HP + the self's mana/endurance), kept as
+    /// one event; HP needs `has_hp && hp_max > 0`, mana/endurance need `wide`.
     StatSync {
         spawn_id: u32,
         wide: bool,
@@ -271,16 +712,20 @@ pub enum Event {
         end_cur: i32,
         end_max: i32,
     },
-    /// The local player moved (OP_ClientUpdate self position).
+    /// Low-level OP_ClientUpdate result retained for direct backend callers. A
+    /// stateful session emits [`Event::PlayerMoved`].
     ///
     /// `spawn_id` is the id the client stamps on its own outbound report. It is
     /// carried here because it is the only self-identifying field that keeps
-    /// arriving mid-session, when no zone-in was witnessed and nothing else can
-    /// tell a host which spawn is the player — see
-    /// `seq_backend_eql::SelfTracker::observe_self_pos`. It is NOT an adoption
-    /// on its own (on eql it names the phantom twin); route it through the
-    /// tracker rather than pinning the player to it.
-    SelfPos { pos: Pos, spawn_id: u32 },
+    /// arriving mid-session. On EQL it names the phantom twin, so only the
+    /// session may adopt it.
+    SelfPos {
+        pos: Pos,
+        spawn_id: u32,
+        velocity: Velocity,
+        delta_heading: Option<i16>,
+        animation: Option<i16>,
+    },
     /// A spawn changed pose/animation (OP_SpawnAppearance2 type 6: 110=sit,
     /// 100=stand, 111=duck). Only the pose subtype is surfaced — other
     /// appearance types carry no spawn field. The consumer updates the tracked
@@ -304,7 +749,7 @@ pub enum Event {
     GuildsInZone { guilds: Vec<GuildInZone> },
     /// A Norrath time sync (OP_TimeOfDay). The consumer surfaces it as a time
     /// sync-point (standalone + in its snapshot) so the client can track the
-    /// game clock. `day` 1..28, `month` 1..12, `hour` 0..23, `minute` 0..59.
+    /// game clock. `day` 1..28, `month` 1..12, `hour` 1..24, `minute` 0..59.
     TimeOfDay {
         year: u32,
         month: u32,
@@ -312,8 +757,19 @@ pub enum Event {
         hour: u32,
         minute: u32,
     },
+    /// A zone transition started or was confirmed. The eql request has no
+    /// destination fields, so those values are absent for that backend.
+    ZoneTransition {
+        character_name: String,
+        zone_id: Option<u32>,
+        instance_id: Option<u32>,
+        confirmed: bool,
+    },
     /// Zone changed (OP_NewZone).
     ZoneChanged(ZoneInfo),
+    /// Safe point and other environment settings from the same OP_NewZone.
+    /// This immediately follows [`Event::ZoneChanged`] in the decode batch.
+    ZoneEnvironmentChanged(ZoneEnvironment),
     /// The local player's profile (OP_PlayerProfile).
     PlayerProfile(ProfileInfo),
     /// The player's active STANCE changed (eql OP_Stance echo). `name` is the
@@ -340,6 +796,25 @@ pub enum Event {
         guild_id: u32,
         members: Vec<GuildRosterMember>,
     },
+    /// Low-level guild roster with structural completeness. A partial prefix is
+    /// additive and never replaces a session's last complete roster.
+    GuildRosterWire {
+        guild_id: u32,
+        members: Vec<GuildRosterMember>,
+        complete: bool,
+    },
+    /// Final guild roster after session-owned replacement and member-status
+    /// correlation. The low-level [`Event::GuildRoster`] remains available
+    /// during host migration.
+    GuildRosterUpdated(GuildRosterState),
+    /// Low-level one-member online/offline update. A session folds this into
+    /// [`Event::GuildRosterUpdated`].
+    GuildMemberStatus {
+        name: String,
+        zone_id: u32,
+        instance_id: u32,
+        last_on: u32,
+    },
     /// The world->zone handoff (OP_ZoneServerInfo): which zone server the client
     /// was just told to connect to.
     ///
@@ -363,11 +838,33 @@ pub enum Event {
     /// fires on each slot move and zone-in pickup). The consumer ACCUMULATES
     /// these — unlike [`Event::ItemSet`], which replaces the whole set.
     ItemLearned { item: ItemTemplate },
+    /// Final authoritative inventory snapshot. The ordered session removes
+    /// duplicate serials before emitting it. An empty snapshot is never
+    /// synthesized from a malformed or request-side packet.
+    InventorySnapshot { items: Vec<ItemTemplate> },
+    /// One changed inventory instance. `previous_location` is present when the
+    /// session already knew the serial, including moves between inventory and
+    /// worn slots. Byte-for-byte duplicate updates do not emit this event.
+    InventoryItemUpdated {
+        item: ItemTemplate,
+        previous_location: Option<ItemLocation>,
+    },
+    /// Authoritative worn-item view derived from an inventory snapshot. Items
+    /// are sorted by worn slot and keep their complete optional fields.
+    EquipmentSnapshot { items: Vec<ItemTemplate> },
+    /// One worn slot changed. `item: None` vacates the slot. A move between two
+    /// worn slots therefore emits the old-slot removal before the new value.
+    EquipmentSlotUpdated {
+        slot: u16,
+        item: Option<ItemTemplate>,
+    },
     /// The guild message of the day (OP_GuildMOTD). `message`/`sender` are empty
     /// when the guild has none set. The wire carries no guild id — the MOTD is
     /// implicitly the local player's guild — so the consumer stamps it from the
     /// roster it tracks (0 if none has arrived).
     GuildMotd { message: String, sender: String },
+    /// Final MOTD with its guild id resolved from session roster state.
+    GuildMotdUpdated(GuildMotdState),
     /// One entry of the guild's rank-name table (OP_ExpandedGuildInfo). Guilds
     /// rename their ranks freely, so a `GuildRosterMember.rank` only means
     /// something against this table. One arrives per rank (right after the
@@ -378,11 +875,13 @@ pub enum Event {
         rank_index: u32,
         rank_name: String,
     },
-    /// A player switched multiclass loadouts (eql OP_LoadoutSwap), changing
+    /// Final accumulated rank-name table after one rank packet.
+    GuildRankNamesUpdated(GuildRankNamesState),
+    /// Low-level eql OP_LoadoutSwap result retained for direct backend callers.
+    /// A stateful session emits a player or spawn identity update, changing
     /// their class + level. eql sends no OP_PlayerProfile on a swap, so this is
-    /// the sole source of the new identity. The consumer owns the self/other
-    /// split (it knows the player id): the self → refresh identity + its player
-    /// snapshot; another spawn → update that spawn's class/level in place.
+    /// the sole source of the new identity. The session owns the self/other
+    /// split.
     /// `class` is the single resolved class, not the multiclass mask.
     LoadoutSwap {
         spawn_id: u32,
@@ -390,23 +889,22 @@ pub enum Event {
         class: u32,
         race: u32,
     },
-    /// A batch of doors / static objects (OP_SpawnDoor).
+    /// The authoritative door/static-object set from OP_SpawnDoor. Door ids
+    /// remain in their own namespace. A host projector creates any compatibility
+    /// id used to merge them into a protobuf spawn list.
     Doors(Vec<DoorInfo>),
     /// A ground item was picked up / removed (OP_ClickObject, S>C removal side —
     /// the C>S click request is ignored). `drop_id` matches the GroundItem's
     /// drop_id; the consumer removes the drop it rendered for that id.
     GroundItemRemoved { drop_id: u32 },
-    /// A ground item / static placeable (OP_GroundSpawn). The daemon renders it
-    /// as a DROP-type spawn (it keeps a separate drop map; a single-map consumer
-    /// offsets the id like doors). `id_file` is the actorDef model string —
-    /// resolving it to a real item name needs the item DB (deferred).
-    GroundItem {
-        drop_id: u32,
-        id_file: String,
-        x: i32,
-        y: i32,
-        z: i32,
-    },
+    /// A ground item or static placeable (OP_GroundSpawn). It remains a ground
+    /// entity here, not a fabricated spawn with a host-specific NPC type.
+    GroundItem(GroundItemInfo),
+    /// A corpse-location response. This is distinct from ordinary movement:
+    /// the packet confirms the entity is a stationary corpse.
+    CorpseLocated { id: u32, position: Point3 },
+    /// The authoritative zone-point set from OP_SendZonePoints.
+    ZonePoints(Vec<ZonePointInfo>),
     /// A damage event (OP_Action2). Ids only; the consumer resolves names from
     /// its spawn map. `kind` is the wire damage type; `spell_id` 0 = melee.
     Combat {
@@ -416,6 +914,40 @@ pub enum Event {
         damage: i32,
         spell_id: u32,
     },
+    /// Final damage meaning. Zero and negative wire spell sentinels become
+    /// `None`, so melee never leaks a fabricated spell id to a host.
+    CombatDamage {
+        source_id: Option<u32>,
+        target_id: Option<u32>,
+        kind: u32,
+        damage: i32,
+        spell_id: Option<u32>,
+    },
+    /// Low-level OP_Action result retained while hosts cut over. The session
+    /// emits [`Event::SpellActionResolved`] from it.
+    SpellAction {
+        source: u32,
+        target: u32,
+        spell_id: u32,
+        caster_level: u8,
+        kind: u8,
+    },
+    /// A spell action reached its target. Unknown spell ids remain numeric;
+    /// hosts may resolve a name, but Rust never creates a placeholder name.
+    SpellActionResolved {
+        source_id: Option<u32>,
+        target_id: Option<u32>,
+        spell_id: u32,
+        caster_level: Option<u8>,
+        kind: u32,
+    },
+    /// Low-level outbound OP_CastSpell request retained while hosts cut over.
+    /// The session infers the caster from its local-player identity.
+    SpellCastRequest {
+        slot: i32,
+        spell_id: u32,
+        target_id: u32,
+    },
     /// A spawn started casting a spell (OP_BeginCast). Ids only; the consumer
     /// resolves the caster name from its spawn map and the spell name from its
     /// spell DB. `cast_time_ms` is the wire cast time (0 = instant).
@@ -424,6 +956,22 @@ pub enum Event {
         spell_id: u32,
         cast_time_ms: u32,
     },
+    /// A cast began. Every field other than the spell id is optional because a
+    /// cold attachment or one-sided capture may supply only part of the state.
+    SpellCastStarted {
+        caster_id: Option<u32>,
+        target_id: Option<u32>,
+        spell_id: u32,
+        cast_time_ms: Option<u32>,
+        slot: Option<i32>,
+    },
+    /// A pending cast ended without a matching action or damage event.
+    SpellCastInterrupted {
+        caster_id: Option<u32>,
+        target_id: Option<u32>,
+        spell_id: u32,
+        reason: CastInterruptionReason,
+    },
     /// The player selected a target (OP_TargetMouse). `spawn_id` 0 = cleared.
     Targeted { spawn_id: u32 },
     /// The player considered a spawn (OP_Consider) — `spawn_id` is the target.
@@ -431,12 +979,22 @@ pub enum Event {
     /// One AA definition from the OP_SendAATable burst: maps a purchased AA's
     /// `desc_id` to a `title_sid` (a dbstring type-1 id → the AA's display name).
     AaTable { desc_id: u32, title_sid: u32 },
+    /// Final AA title mapping. Repeated identical table rows are suppressed by
+    /// the ordered session.
+    AlternateAbilityDefined(AlternateAbilityDefinition),
     /// The regular experience bar (OP_ExpUpdate), 0..100000 within a level. On
     /// eql there is no discrete level packet — a wrap (decrease) is a ding.
     Exp { exp: u32 },
+    /// Final regular experience state. The session merges level and exp
+    /// packets and suppresses duplicate absolute values.
+    ExperienceUpdated(ExperienceProgress),
     /// AA experience (OP_AAExpUpdate): `alt_exp` 0..100000 toward the next point,
     /// `aa_points` = unspent points.
     AaExp { alt_exp: u32, aa_points: u32 },
+    /// Final incremental AA bar and unspent-point state.
+    AlternateAdvancementUpdated(AlternateAdvancementProgress),
+    /// Final authoritative purchased-AA and point snapshot from the profile.
+    AlternateAdvancementSnapshot(AlternateAdvancementSnapshot),
     /// Hunger / thirst (OP_Stamina), in ticks till the next eat/drink. NOT the
     /// run/jump endurance bar — that is OP_EndUpdate.
     Stamina { food: u32, water: u32 },
@@ -446,6 +1004,12 @@ pub enum Event {
     /// A single skill's new value (OP_SkillUpdate) — the consumer updates that
     /// skill id in the player's skill map.
     SkillUpdate { skill_id: u32, value: u32 },
+    /// Final authoritative learned-skill snapshot. Invalid and zero values are
+    /// absent; entries are sorted by skill id.
+    SkillsSnapshot { skills: Vec<SkillValue> },
+    /// Final absolute value for one learned skill. Duplicate values do not emit
+    /// another semantic event.
+    SkillValueUpdated(SkillValue),
     /// A corpse-loot event (OP_LootTransaction): an item confirmation carrying
     /// auto-sale proceeds, or the corpse's coin pile (`from_corpse`, item
     /// fields 0). Both are acquired coin — add `coin_copper` to the running
@@ -463,6 +1027,12 @@ pub enum Event {
         corpse_name: String,
         items: Vec<LootItemInfo>,
     },
+    /// A deduplicated corpse window with session-owned timestamp and zone
+    /// context. Direct backend callers still receive [`Event::LootDrops`].
+    CorpseLootSnapshot(Box<CorpseLootSnapshot>),
+    /// A paired item acquisition, corpse coin pile, or an explicitly incomplete
+    /// half closed by a session boundary.
+    LootAcquired(Box<LootAcquisition>),
     /// The carried purse (OP_MoneyUpdate, 0x6414). Denominations are NOT
     /// normalized on the wire — the consumer sums to total copper.
     Money {
@@ -471,6 +1041,8 @@ pub enum Event {
         silver: u32,
         copper: u32,
     },
+    /// Final carried-purse state. Duplicate purse packets are suppressed.
+    MoneyBalanceUpdated(MoneyBalance),
     /// A string-id server message (OP_SimpleMessage): `format_id` resolves to
     /// text via the eqstr DB (no args); `color` is the wire ChatColor.
     SimpleMessage { format_id: u32, color: u32 },
@@ -512,11 +1084,44 @@ pub enum Event {
         chat_color: u32,
         channel_name: String,
     },
+    /// Final chat meaning. Direct text is decoded and link-cleaned. Localized
+    /// messages carry `format_id` and arguments for the host eqstr projector.
+    ChatMessage(ChatMessage),
+    /// Low-level decoded UCS record retained for adapter diagnostics. A session
+    /// repairs the masked channel name and emits [`Event::ChatMessage`] after it.
+    UcsRecord {
+        channel_first: u8,
+        channel_rest: String,
+        channel_run: String,
+        sender: String,
+        message: String,
+        spam: bool,
+    },
     /// The authoritative active-buff list for one spawn (eql OP_BuffList), sent
     /// at zone-in and on every buff change. A full snapshot: the consumer
     /// REPLACES that owner's buffs. `owner` == the player → the buff panel; a
     /// mob → that mob's effects. `remaining_ticks <= 0` on an entry = permanent.
     BuffList { owner: u32, entries: Vec<BuffEntry> },
+    /// Low-level variable OP_Buff result retained while hosts cut over.
+    BuffWire {
+        spawn_id: u32,
+        spell_id: u32,
+        form: u8,
+        slot: u8,
+        duration_ticks: u32,
+        change_type: u32,
+    },
+    /// A spell effect became active in a previously empty owner/slot entry.
+    BuffAdded(ActiveBuff),
+    /// An existing owner/slot entry changed duration or caster attribution.
+    BuffUpdated(ActiveBuff),
+    /// An active effect disappeared. Missing owner or slot values preserve
+    /// partial session state instead of inserting host sentinel ids.
+    BuffRemoved {
+        owner_id: Option<u32>,
+        spell_id: u32,
+        slot: Option<u32>,
+    },
     /// A member joined the group (OP_GroupFollow): `name` (the invitee) is added
     /// to the roster. `level` is the member's wire level (0 if absent).
     GroupFollow { name: String, level: u32 },
@@ -526,6 +1131,34 @@ pub enum Event {
         yourname: String,
         membername: String,
     },
+    /// Low-level full group-roster scan. `complete` reports whether the declared
+    /// member count was fully represented by unique decoded names.
+    GroupRosterWire {
+        group_id: u32,
+        member_count: u32,
+        names: Vec<String>,
+        complete: bool,
+    },
+    /// Final stable peer-slot state after full and incremental roster packets.
+    GroupRosterUpdated(GroupRosterState),
+    /// Low-level dynamic-zone information half.
+    DynamicZoneInfo {
+        active: bool,
+        max_players: u32,
+        expedition_name: String,
+        leader_name: String,
+    },
+    /// Low-level dynamic-zone switch half. `active: false` is the eight-byte
+    /// quit form and carries no destination fields.
+    DynamicZoneSwitch {
+        active: bool,
+        zone_id: Option<u16>,
+        instance_id: Option<u16>,
+        kind: Option<u32>,
+        position: Option<Point3>,
+    },
+    /// Final dynamic-zone state assembled by the ordered session.
+    DynamicZoneUpdated(DynamicZoneState),
     /// The player levelled (OP_LevelUpdate). `level` is absolute, not a delta —
     /// consumers should assign it rather than increment. `exp` is the post-ding
     /// exp value, which cross-references the next Exp event.
@@ -534,13 +1167,13 @@ pub enum Event {
         level_old: u32,
         exp: u32,
     },
-    /// Zone-in boundary marker (OP_EnterWorld) — no payload; the daemon uses it
-    /// to reset per-zone state.
-    EnterWorld,
+    /// The client entered the world with a character. A
+    /// [`Event::SessionReset`] immediately precedes this event.
+    EnterWorld { character_name: String },
 }
 
 /// Outcome of decoding one app packet.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub enum Decoded {
     /// One neutral event.
     One(Event),

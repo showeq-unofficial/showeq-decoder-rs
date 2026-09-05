@@ -201,9 +201,8 @@ mod ffi {
         from_corpse: bool,
         ok: bool,
     }
-    // eql OP_LootMessage: the personal loot narration. item_id/item_name come
-    // off the link header (0/empty when the line carries no item link) and are
-    // authoritative — a consumer never has to recover the item from the prose.
+    // eql OP_LootMessage narration; item_id/item_name come off the link header
+    // (0/empty without a link), so consumers never parse the prose.
     struct LootMessage {
         color: u32,
         text: String,
@@ -211,11 +210,8 @@ mod ffi {
         item_name: String,
         ok: bool,
     }
-    // One durable loot row from EqlLootTracker. `source` is "message" (what the
-    // player acquired), "window" (corpse contents) or "coin" (a pile); 0 stands
-    // in for SQL NULL on the id/icon columns. `sequence` is the confirmation's
-    // monotonic counter — the host dedups acquisitions on it, since more than
-    // one recorder may be watching the same capture.
+    // Compatibility loot row: `source` is message|window|coin, 0 = SQL NULL, and
+    // hosts dedup on `sequence`. New paths use LootAcquired/CorpseLootSnapshot.
     struct LootRow {
         ts: i64,
         source: String,
@@ -234,6 +230,7 @@ mod ffi {
         disposition: String,
         looter: String,
         sequence: u32,
+        complete: bool,
     }
     struct MoneyUpdate {
         platinum: u32,
@@ -391,15 +388,6 @@ mod ffi {
         // with the ones the player put on it; only this tells them apart.
         caster: String,
     }
-    // One point in the EQL self-position breadcrumb (OP_SelfPosEQL). Game
-    // coords (not screen-negated); `ts` is a per-sample monotonic timer. Ordered
-    // oldest -> newest. An empty Vec = decode failed / not the breadcrumb.
-    struct SelfPosPoint {
-        x: f32,
-        y: f32,
-        z: f32,
-        ts: u32,
-    }
     // One EQL UCS (cross-zone chat) line. `channel_first` is the still-masked
     // first byte of the channel name; `channel_rest` is the clean remainder.
     // The caller recovers the per-session mask (from the General* crib) to
@@ -502,12 +490,6 @@ mod ffi {
         z: f32,
         ok: bool,
     }
-    struct StartCast {
-        slot: i32,
-        spell_id: u32,
-        target_id: u32,
-        ok: bool,
-    }
     struct Action {
         target: u16,
         source: u16,
@@ -529,12 +511,6 @@ mod ffi {
         group_id: u32,
         member_count: u32,
         // scanned member names, '\n'-separated (daemon splits + dedups + self-filters).
-        names: String,
-        ok: bool,
-    }
-    struct GroupRoster {
-        group_id: u32,
-        // full-roster member names, '\n'-separated (solo group = empty).
         names: String,
         ok: bool,
     }
@@ -792,7 +768,1020 @@ mod ffi {
         ok: bool,
     }
 
+    // Stateful Session API. cxx cannot express a Rust enum whose variants own
+    // different payloads, so a batch uses tagged references into typed payload
+    // vectors. C++ switches on `kind`, reads `payload_index` from the matching
+    // vector, and can construct its std::variant mechanically.
+    enum SessionBackend {
+        Live = 0,
+        Test = 1,
+        Eql = 2,
+    }
+    enum SessionStream {
+        World = 0,
+        Zone = 1,
+    }
+    enum SessionDirection {
+        ServerToClient = 0,
+        ClientToServer = 1,
+    }
+    enum SessionFlushReason {
+        Shutdown = 0,
+        ZoneTransition = 1,
+        ReplayEnd = 2,
+        Reset = 3,
+    }
+    enum EventSessionResetReason {
+        EnterWorld = 0,
+        PlayerProfile = 1,
+        ZoneTransition = 2,
+        Explicit = 3,
+    }
+    enum EventCastInterruptionReason {
+        ServerMessage = 0,
+        Superseded = 1,
+        SessionReset = 2,
+        ReplayEnd = 3,
+        Shutdown = 4,
+    }
+    enum EventChatMessageKind {
+        Common = 0,
+        Simple = 1,
+        Formatted = 2,
+        Special = 3,
+        Loot = 4,
+        Ucs = 5,
+    }
+    enum SessionDisposition {
+        Decoded = 0,
+        Ignored = 1,
+        Unhandled = 2,
+        Malformed = 3,
+        Unmapped = 4,
+    }
+    enum SessionEventKind {
+        SpawnAdded = 0,
+        SpawnMoved = 1,
+        SpawnRemoved = 2,
+        SpawnKilled = 3,
+        SpawnHp = 4,
+        StatSync = 5,
+        SelfPos = 6,
+        SpawnAnimation = 7,
+        SpawnIllusion = 8,
+        GuildsInZone = 9,
+        TimeOfDay = 10,
+        ZoneChanged = 11,
+        PlayerProfile = 12,
+        Stance = 13,
+        Invocation = 14,
+        InspectAnswer = 15,
+        GuildRoster = 16,
+        ZoneServerInfo = 17,
+        ItemSet = 18,
+        ItemLearned = 19,
+        GuildMotd = 20,
+        GuildRankName = 21,
+        LoadoutSwap = 22,
+        Doors = 23,
+        GroundItemRemoved = 24,
+        GroundItem = 25,
+        Combat = 26,
+        SpawnCast = 27,
+        Targeted = 28,
+        Considered = 29,
+        AaTable = 30,
+        Exp = 31,
+        AaExp = 32,
+        Stamina = 33,
+        ManaUpdate = 34,
+        SkillUpdate = 35,
+        LootTransaction = 36,
+        LootDrops = 37,
+        Money = 38,
+        SimpleMessage = 39,
+        FormattedMessage = 40,
+        SpecialMessage = 41,
+        LootMessage = 42,
+        Chat = 43,
+        BuffList = 44,
+        GroupFollow = 45,
+        GroupDisband = 46,
+        LevelUpdate = 47,
+        EnterWorld = 48,
+        SessionReset = 49,
+        ZoneTransition = 50,
+        ZoneEnvironmentChanged = 51,
+        SpawnRenamed = 52,
+        CorpseLocated = 53,
+        ZonePoints = 54,
+        PlayerIdentityUpdated = 55,
+        PlayerMoved = 56,
+        PlayerVitalsUpdated = 57,
+        SpawnHealthUpdated = 58,
+        PlayerDied = 59,
+        SpawnDied = 60,
+        SpawnIdentityUpdated = 61,
+        PlayerAppearanceUpdated = 62,
+        InventorySnapshot = 63,
+        InventoryItemUpdated = 64,
+        EquipmentSnapshot = 65,
+        EquipmentSlotUpdated = 66,
+        MoneyBalanceUpdated = 67,
+        SkillsSnapshot = 68,
+        SkillValueUpdated = 69,
+        ExperienceUpdated = 70,
+        AlternateAdvancementSnapshot = 71,
+        AlternateAdvancementUpdated = 72,
+        AlternateAbilityDefined = 73,
+        CorpseLootSnapshot = 74,
+        LootAcquired = 75,
+        CombatDamage = 76,
+        SpellAction = 77,
+        SpellActionResolved = 78,
+        SpellCastRequest = 79,
+        SpellCastStarted = 80,
+        SpellCastInterrupted = 81,
+        BuffWire = 82,
+        BuffAdded = 83,
+        BuffUpdated = 84,
+        BuffRemoved = 85,
+        ChatMessage = 86,
+        UcsRecord = 87,
+        GroupRosterWire = 88,
+        GroupRosterUpdated = 89,
+        GuildRosterUpdated = 90,
+        GuildMemberStatus = 91,
+        GuildMotdUpdated = 92,
+        GuildRankNamesUpdated = 93,
+        DynamicZoneInfo = 94,
+        DynamicZoneSwitch = 95,
+        DynamicZoneUpdated = 96,
+        GuildRosterWire = 97,
+    }
+
+    struct SessionEventRef {
+        kind: SessionEventKind,
+        payload_index: u32,
+    }
+    struct EventPos {
+        x: i32,
+        y: i32,
+        z: i32,
+        heading_deg: u16,
+    }
+    struct EventVelocity {
+        has_x: bool,
+        x: i32,
+        has_y: bool,
+        y: i32,
+        has_z: bool,
+        z: i32,
+    }
+    struct EventPoint3 {
+        x: f32,
+        y: f32,
+        z: f32,
+    }
+    struct EventPlayerIdentity {
+        has_spawn_id: bool,
+        spawn_id: u32,
+        name: String,
+        last_name: String,
+        race: u32,
+        class_: u32,
+        deity: u32,
+        level: u32,
+        class_mask: u32,
+    }
+    struct EventPlayerMoved {
+        has_spawn_id: bool,
+        spawn_id: u32,
+        pos: EventPos,
+    }
+    struct EventVitalValue {
+        current: i32,
+        has_maximum: bool,
+        maximum: i32,
+    }
+    struct EventPlayerVitals {
+        has_health: bool,
+        health: EventVitalValue,
+        has_mana: bool,
+        mana: EventVitalValue,
+        has_endurance: bool,
+        endurance: EventVitalValue,
+    }
+    struct EventSpawnHealth {
+        id: u32,
+        current: i32,
+        maximum: i32,
+    }
+    struct EventPlayerDied {
+        has_killer_id: bool,
+        killer_id: u32,
+    }
+    struct EventSpawnDied {
+        id: u32,
+        has_killer_id: bool,
+        killer_id: u32,
+    }
+    struct EventSpawnIdentity {
+        id: u32,
+        level: u32,
+        class_: u32,
+        race: u32,
+    }
+    struct EventPlayerAppearance {
+        has_race: bool,
+        race: u32,
+        has_gender: bool,
+        gender: u8,
+        has_animation: bool,
+        animation: u32,
+    }
+    struct EventSpawnInfo {
+        id: u32,
+        name: String,
+        last_name: String,
+        race: u32,
+        class_: u32,
+        deity: u32,
+        level: u8,
+        npc: u8,
+        cur_hp: u32,
+        has_max_hp: bool,
+        max_hp: u32,
+        guild_id: u32,
+        guild_server_id: u32,
+        class_mask: u32,
+        has_pos: bool,
+        pos: EventPos,
+        velocity: EventVelocity,
+        has_delta_heading: bool,
+        delta_heading: i16,
+        has_animation: bool,
+        animation: i16,
+        has_equipment_models: bool,
+        equipment_models: Vec<u32>,
+    }
+    struct EventProfileInfo {
+        name: String,
+        last_name: String,
+        class_: u32,
+        level: u8,
+        race: u32,
+        deity: u32,
+        cur_hp: u32,
+        mana: u32,
+        aa_ids: Vec<u32>,
+        aa_values: Vec<u32>,
+        aa_spent: u32,
+        aa_assigned: u32,
+        aa_unspent: u32,
+        aa_experience: u32,
+        skills: Vec<u32>,
+        class_mask: u32,
+        str_: u32,
+        sta: u32,
+        cha: u32,
+        dex: u32,
+        int_: u32,
+        agi: u32,
+        wis: u32,
+        platinum: u32,
+        gold: u32,
+        silver: u32,
+        copper: u32,
+    }
+    struct EventGuildInZone {
+        guild_id: u32,
+        server_id: u32,
+        name: String,
+    }
+    struct EventGuildRosterMember {
+        name: String,
+        level: u32,
+        class_: u32,
+        class_mask: u32,
+        rank: u32,
+        last_on: u32,
+        banker: bool,
+        alt: bool,
+        full_member: bool,
+        public_note: String,
+        zone_id: u32,
+    }
+    struct EventItemTemplate {
+        serial: String,
+        name: String,
+        lore_name: String,
+        item_id: u32,
+        has_icon: bool,
+        icon: u32,
+        has_stack_count: bool,
+        stack_count: u32,
+        has_weight_tenths: bool,
+        weight_tenths: u32,
+        has_flags: bool,
+        flags: u32,
+        has_corruption: bool,
+        corruption: i32,
+        slot_mask: u32,
+        container_id: u32,
+        container_slot: u16,
+        parent_slot: u16,
+        stats: Vec<i32>,
+        resists: Vec<i32>,
+        hp: i32,
+        mana: i32,
+        endurance: i32,
+        ac: i32,
+    }
+    struct EventDoorInfo {
+        id: u32,
+        name: String,
+        position: EventPoint3,
+        heading: f32,
+        incline: u32,
+        size: u32,
+        open_type: u8,
+        state: u8,
+        invert_state: u8,
+        has_zone_point_id: bool,
+        zone_point_id: u32,
+    }
+    struct EventLootItemInfo {
+        name: String,
+        icon: u32,
+        item_id: u32,
+    }
+    struct EventBuffEntry {
+        spell_id: u32,
+        remaining_ticks: i32,
+        slot: u32,
+        caster: String,
+    }
+    struct EventSpawnMoved {
+        id: u32,
+        pos: EventPos,
+        velocity: EventVelocity,
+        has_delta_heading: bool,
+        delta_heading: i16,
+        has_animation: bool,
+        animation: i16,
+    }
+    struct EventSpawnRenamed {
+        has_id: bool,
+        id: u32,
+        old_name: String,
+        new_name: String,
+    }
+    struct EventSpawnId {
+        id: u32,
+    }
+    struct EventSpawnKilled {
+        deceased_id: u32,
+        killer_id: u32,
+    }
+    struct EventSpawnHp {
+        id: u32,
+        cur: i32,
+        max: i32,
+    }
+    struct EventStatSync {
+        spawn_id: u32,
+        wide: bool,
+        has_hp: bool,
+        hp_cur: i32,
+        hp_max: i32,
+        has_mana: bool,
+        mana_cur: i32,
+        mana_max: i32,
+        has_end: bool,
+        end_cur: i32,
+        end_max: i32,
+    }
+    struct EventSelfPos {
+        pos: EventPos,
+        spawn_id: u32,
+        velocity: EventVelocity,
+        has_delta_heading: bool,
+        delta_heading: i16,
+        has_animation: bool,
+        animation: i16,
+    }
+    struct EventSpawnAnimation {
+        spawn_id: u32,
+        animation: u32,
+    }
+    struct EventSpawnIllusion {
+        spawn_id: u32,
+        race: u32,
+        gender: u8,
+    }
+    struct EventGuildsInZone {
+        guilds: Vec<EventGuildInZone>,
+    }
+    struct EventTimeOfDay {
+        year: u32,
+        month: u32,
+        day: u32,
+        hour: u32,
+        minute: u32,
+    }
+    struct EventZoneInfo {
+        short_name: String,
+        long_name: String,
+    }
+    struct EventSessionReset {
+        reason: EventSessionResetReason,
+    }
+    struct EventZoneTransition {
+        character_name: String,
+        has_zone_id: bool,
+        zone_id: u32,
+        has_instance_id: bool,
+        instance_id: u32,
+        confirmed: bool,
+    }
+    struct EventZoneEnvironment {
+        zone_file: String,
+        experience_multiplier: f32,
+        safe_x: f32,
+        safe_y: f32,
+        safe_z: f32,
+    }
+    struct EventEnterWorld {
+        character_name: String,
+    }
+    struct EventNamed {
+        name: String,
+    }
+    struct EventInspectAnswer {
+        spawn_id: u32,
+        item_names: Vec<String>,
+        bio: String,
+    }
+    struct EventGuildRoster {
+        guild_id: u32,
+        members: Vec<EventGuildRosterMember>,
+    }
+    struct EventZoneServerInfo {
+        host: String,
+        port: u32,
+    }
+    struct EventItemSet {
+        items: Vec<EventItemTemplate>,
+    }
+    struct EventItemLearned {
+        item: EventItemTemplate,
+    }
+    struct EventInventorySnapshot {
+        items: Vec<EventItemTemplate>,
+    }
+    struct EventItemLocation {
+        container_id: u32,
+        container_slot: u16,
+        parent_slot: u16,
+    }
+    struct EventInventoryItemUpdated {
+        item: EventItemTemplate,
+        has_previous_location: bool,
+        previous_location: EventItemLocation,
+    }
+    struct EventEquipmentSnapshot {
+        items: Vec<EventItemTemplate>,
+    }
+    struct EventEquipmentSlotUpdated {
+        slot: u16,
+        has_item: bool,
+        item: EventItemTemplate,
+    }
+    struct EventGuildMotdPayload {
+        message: String,
+        sender: String,
+    }
+    struct EventGuildRankName {
+        guild_id: u32,
+        rank_index: u32,
+        rank_name: String,
+    }
+    struct EventLoadoutSwap {
+        spawn_id: u32,
+        level: u32,
+        class_: u32,
+        race: u32,
+    }
+    struct EventDoors {
+        doors: Vec<EventDoorInfo>,
+    }
+    struct EventGroundItemRemoved {
+        drop_id: u32,
+    }
+    struct EventGroundItem {
+        id: u32,
+        actor_definition: String,
+        position: EventPoint3,
+        has_heading: bool,
+        heading: f32,
+    }
+    struct EventCorpseLocated {
+        id: u32,
+        position: EventPoint3,
+    }
+    struct EventZonePointInfo {
+        has_trigger_id: bool,
+        trigger_id: u32,
+        has_actor_definition: bool,
+        actor_definition: String,
+        position: EventPoint3,
+        heading: f32,
+        has_destination_zone_id: bool,
+        destination_zone_id: u16,
+        has_destination_instance_id: bool,
+        destination_instance_id: u16,
+    }
+    struct EventZonePoints {
+        points: Vec<EventZonePointInfo>,
+    }
+    struct EventCombat {
+        source: u32,
+        target: u32,
+        kind: u32,
+        damage: i32,
+        spell_id: u32,
+    }
+    struct EventCombatDamage {
+        has_source_id: bool,
+        source_id: u32,
+        has_target_id: bool,
+        target_id: u32,
+        kind: u32,
+        damage: i32,
+        has_spell_id: bool,
+        spell_id: u32,
+    }
+    struct EventSpellAction {
+        source: u32,
+        target: u32,
+        spell_id: u32,
+        caster_level: u8,
+        kind: u8,
+    }
+    struct EventSpellActionResolved {
+        has_source_id: bool,
+        source_id: u32,
+        has_target_id: bool,
+        target_id: u32,
+        spell_id: u32,
+        has_caster_level: bool,
+        caster_level: u8,
+        kind: u32,
+    }
+    struct EventSpellCastRequest {
+        slot: i32,
+        spell_id: u32,
+        target_id: u32,
+    }
+    struct EventSpawnCast {
+        caster_id: u32,
+        spell_id: u32,
+        cast_time_ms: u32,
+    }
+    struct EventSpellCastStarted {
+        has_caster_id: bool,
+        caster_id: u32,
+        has_target_id: bool,
+        target_id: u32,
+        spell_id: u32,
+        has_cast_time_ms: bool,
+        cast_time_ms: u32,
+        has_slot: bool,
+        slot: i32,
+    }
+    struct EventSpellCastInterrupted {
+        has_caster_id: bool,
+        caster_id: u32,
+        has_target_id: bool,
+        target_id: u32,
+        spell_id: u32,
+        reason: EventCastInterruptionReason,
+    }
+    struct EventAaTable {
+        desc_id: u32,
+        title_sid: u32,
+    }
+    struct EventAlternateAbilityDefinition {
+        ability_id: u32,
+        title_string_id: u32,
+    }
+    struct EventExp {
+        exp: u32,
+    }
+    struct EventAaExp {
+        alt_exp: u32,
+        aa_points: u32,
+    }
+    struct EventAlternateAbilityRank {
+        ability_id: u32,
+        rank: u32,
+    }
+    struct EventAlternateAdvancementSnapshot {
+        purchased: Vec<EventAlternateAbilityRank>,
+        has_spent_points: bool,
+        spent_points: u32,
+        has_assigned_points: bool,
+        assigned_points: u32,
+        unspent_points: u32,
+        experience: u32,
+    }
+    struct EventAlternateAdvancementProgress {
+        experience: u32,
+        unspent_points: u32,
+    }
+    struct EventStaminaPayload {
+        food: u32,
+        water: u32,
+    }
+    struct EventManaUpdate {
+        mana: u32,
+    }
+    struct EventSkillUpdatePayload {
+        skill_id: u32,
+        value: u32,
+    }
+    struct EventSkillValue {
+        skill_id: u32,
+        value: u32,
+    }
+    struct EventSkillsSnapshot {
+        skills: Vec<EventSkillValue>,
+    }
+    struct EventExperienceProgress {
+        experience: u32,
+        has_level: bool,
+        level: u32,
+        has_previous_level: bool,
+        previous_level: u32,
+    }
+    struct EventLootTransactionPayload {
+        corpse_id: u32,
+        item_id: u32,
+        quantity: u32,
+        coin_copper: u32,
+        from_corpse: bool,
+    }
+    struct EventLootDropsPayload {
+        corpse_id: u32,
+        corpse_name: String,
+        items: Vec<EventLootItemInfo>,
+    }
+    struct EventCorpseLootSnapshot {
+        timestamp: i64,
+        corpse_id: u32,
+        corpse_name: String,
+        corpse_name_normalized: String,
+        zone_short: String,
+        zone_base: String,
+        instance: String,
+        looter: String,
+        items: Vec<EventLootItemInfo>,
+    }
+    struct EventLootAcquisition {
+        timestamp: i64,
+        item_name: String,
+        has_item_id: bool,
+        item_id: u32,
+        quantity: u32,
+        corpse_name: String,
+        corpse_name_normalized: String,
+        has_corpse_id: bool,
+        corpse_id: u32,
+        zone_short: String,
+        zone_base: String,
+        instance: String,
+        sold: bool,
+        coin_copper: u32,
+        disposition: String,
+        looter: String,
+        has_sequence: bool,
+        sequence: u32,
+        from_corpse: bool,
+        complete: bool,
+    }
+    struct EventMoney {
+        platinum: u32,
+        gold: u32,
+        silver: u32,
+        copper: u32,
+    }
+    struct EventMoneyBalance {
+        platinum: u32,
+        gold: u32,
+        silver: u32,
+        copper: u32,
+    }
+    struct EventSimpleMessagePayload {
+        format_id: u32,
+        color: u32,
+    }
+    struct EventFormattedMessagePayload {
+        format_id: u32,
+        color: u32,
+        args: Vec<String>,
+    }
+    struct EventSpecialMessagePayload {
+        color: u32,
+        target: u32,
+        source: String,
+        message: String,
+    }
+    struct EventLootMessagePayload {
+        color: u32,
+        text: String,
+        item_id: u32,
+        item_name: String,
+    }
+    struct EventChat {
+        channel: u32,
+        from: String,
+        target: String,
+        text: String,
+        chat_color: u32,
+        channel_name: String,
+    }
+    struct EventChatMessage {
+        kind: EventChatMessageKind,
+        channel: u32,
+        from: String,
+        target: String,
+        text: String,
+        chat_color: u32,
+        channel_name: String,
+        has_format_id: bool,
+        format_id: u32,
+        args: Vec<String>,
+    }
+    struct EventUcsRecord {
+        channel_first: u8,
+        channel_rest: String,
+        channel_run: String,
+        sender: String,
+        message: String,
+        spam: bool,
+    }
+    struct EventBuffList {
+        owner: u32,
+        entries: Vec<EventBuffEntry>,
+    }
+    struct EventBuffWire {
+        spawn_id: u32,
+        spell_id: u32,
+        form: u8,
+        slot: u8,
+        duration_ticks: u32,
+        change_type: u32,
+    }
+    struct EventActiveBuff {
+        has_owner_id: bool,
+        owner_id: u32,
+        spell_id: u32,
+        has_remaining_ticks: bool,
+        remaining_ticks: i32,
+        has_slot: bool,
+        slot: u32,
+        has_caster_id: bool,
+        caster_id: u32,
+        has_caster_name: bool,
+        caster_name: String,
+    }
+    struct EventBuffRemoved {
+        has_owner_id: bool,
+        owner_id: u32,
+        spell_id: u32,
+        has_slot: bool,
+        slot: u32,
+    }
+    struct EventGroupFollowPayload {
+        name: String,
+        level: u32,
+    }
+    struct EventGroupDisbandPayload {
+        yourname: String,
+        membername: String,
+    }
+    struct EventGroupMember {
+        slot: u8,
+        name: String,
+        has_level: bool,
+        level: u32,
+    }
+    struct EventGroupRosterWire {
+        group_id: u32,
+        member_count: u32,
+        names: Vec<String>,
+        complete: bool,
+    }
+    struct EventGroupRosterState {
+        has_group_id: bool,
+        group_id: u32,
+        members: Vec<EventGroupMember>,
+        complete: bool,
+    }
+    struct EventGuildRosterState {
+        guild_id: u32,
+        members: Vec<EventGuildRosterMember>,
+        complete: bool,
+    }
+    struct EventGuildMemberStatus {
+        name: String,
+        zone_id: u32,
+        instance_id: u32,
+        last_on: u32,
+    }
+    struct EventGuildMotdState {
+        guild_id: u32,
+        message: String,
+        sender: String,
+    }
+    struct EventGuildRankNameEntry {
+        rank_index: u32,
+        rank_name: String,
+    }
+    struct EventGuildRankNamesState {
+        guild_id: u32,
+        ranks: Vec<EventGuildRankNameEntry>,
+    }
+    struct EventDynamicZoneInfo {
+        active: bool,
+        max_players: u32,
+        expedition_name: String,
+        leader_name: String,
+    }
+    struct EventDynamicZoneSwitch {
+        active: bool,
+        has_zone_id: bool,
+        zone_id: u16,
+        has_instance_id: bool,
+        instance_id: u16,
+        has_kind: bool,
+        kind: u32,
+        has_position: bool,
+        position: EventPoint3,
+    }
+    struct EventDynamicZoneState {
+        active: bool,
+        has_zone_id: bool,
+        zone_id: u16,
+        has_instance_id: bool,
+        instance_id: u16,
+        has_kind: bool,
+        kind: u32,
+        has_position: bool,
+        position: EventPoint3,
+        has_max_players: bool,
+        max_players: u32,
+        expedition_name: String,
+        leader_name: String,
+        complete: bool,
+    }
+    struct EventLevelUpdatePayload {
+        level: u32,
+        level_old: u32,
+        exp: u32,
+    }
+    struct SessionDecodeBatch {
+        protocol_generation: u64,
+        disposition: SessionDisposition,
+        events: Vec<SessionEventRef>,
+        player_identity_updated: Vec<EventPlayerIdentity>,
+        player_moved: Vec<EventPlayerMoved>,
+        player_vitals_updated: Vec<EventPlayerVitals>,
+        spawn_health_updated: Vec<EventSpawnHealth>,
+        player_died: Vec<EventPlayerDied>,
+        spawn_died: Vec<EventSpawnDied>,
+        spawn_identity_updated: Vec<EventSpawnIdentity>,
+        player_appearance_updated: Vec<EventPlayerAppearance>,
+        spawn_added: Vec<EventSpawnInfo>,
+        spawn_moved: Vec<EventSpawnMoved>,
+        spawn_removed: Vec<EventSpawnId>,
+        spawn_renamed: Vec<EventSpawnRenamed>,
+        spawn_killed: Vec<EventSpawnKilled>,
+        spawn_hp: Vec<EventSpawnHp>,
+        stat_sync: Vec<EventStatSync>,
+        self_pos: Vec<EventSelfPos>,
+        spawn_animation: Vec<EventSpawnAnimation>,
+        spawn_illusion: Vec<EventSpawnIllusion>,
+        guilds_in_zone: Vec<EventGuildsInZone>,
+        time_of_day: Vec<EventTimeOfDay>,
+        zone_changed: Vec<EventZoneInfo>,
+        session_reset: Vec<EventSessionReset>,
+        zone_transition: Vec<EventZoneTransition>,
+        zone_environment_changed: Vec<EventZoneEnvironment>,
+        player_profile: Vec<EventProfileInfo>,
+        named: Vec<EventNamed>,
+        inspect_answer: Vec<EventInspectAnswer>,
+        guild_roster: Vec<EventGuildRoster>,
+        zone_server_info: Vec<EventZoneServerInfo>,
+        item_set: Vec<EventItemSet>,
+        item_learned: Vec<EventItemLearned>,
+        inventory_snapshot: Vec<EventInventorySnapshot>,
+        inventory_item_updated: Vec<EventInventoryItemUpdated>,
+        equipment_snapshot: Vec<EventEquipmentSnapshot>,
+        equipment_slot_updated: Vec<EventEquipmentSlotUpdated>,
+        guild_motd: Vec<EventGuildMotdPayload>,
+        guild_rank_name: Vec<EventGuildRankName>,
+        loadout_swap: Vec<EventLoadoutSwap>,
+        doors: Vec<EventDoors>,
+        ground_item_removed: Vec<EventGroundItemRemoved>,
+        ground_item: Vec<EventGroundItem>,
+        corpse_located: Vec<EventCorpseLocated>,
+        zone_points: Vec<EventZonePoints>,
+        combat: Vec<EventCombat>,
+        combat_damage: Vec<EventCombatDamage>,
+        spell_action: Vec<EventSpellAction>,
+        spell_action_resolved: Vec<EventSpellActionResolved>,
+        spell_cast_request: Vec<EventSpellCastRequest>,
+        spawn_cast: Vec<EventSpawnCast>,
+        spell_cast_started: Vec<EventSpellCastStarted>,
+        spell_cast_interrupted: Vec<EventSpellCastInterrupted>,
+        spawn_id: Vec<EventSpawnId>,
+        aa_table: Vec<EventAaTable>,
+        alternate_ability_defined: Vec<EventAlternateAbilityDefinition>,
+        exp: Vec<EventExp>,
+        experience_updated: Vec<EventExperienceProgress>,
+        aa_exp: Vec<EventAaExp>,
+        alternate_advancement_snapshot: Vec<EventAlternateAdvancementSnapshot>,
+        alternate_advancement_updated: Vec<EventAlternateAdvancementProgress>,
+        stamina: Vec<EventStaminaPayload>,
+        mana_update: Vec<EventManaUpdate>,
+        skill_update: Vec<EventSkillUpdatePayload>,
+        skills_snapshot: Vec<EventSkillsSnapshot>,
+        skill_value_updated: Vec<EventSkillValue>,
+        loot_transaction: Vec<EventLootTransactionPayload>,
+        loot_drops: Vec<EventLootDropsPayload>,
+        corpse_loot_snapshot: Vec<EventCorpseLootSnapshot>,
+        loot_acquired: Vec<EventLootAcquisition>,
+        money: Vec<EventMoney>,
+        money_balance_updated: Vec<EventMoneyBalance>,
+        simple_message: Vec<EventSimpleMessagePayload>,
+        formatted_message: Vec<EventFormattedMessagePayload>,
+        special_message: Vec<EventSpecialMessagePayload>,
+        loot_message: Vec<EventLootMessagePayload>,
+        chat: Vec<EventChat>,
+        chat_message: Vec<EventChatMessage>,
+        ucs_record: Vec<EventUcsRecord>,
+        buff_list: Vec<EventBuffList>,
+        buff_wire: Vec<EventBuffWire>,
+        buff_added: Vec<EventActiveBuff>,
+        buff_updated: Vec<EventActiveBuff>,
+        buff_removed: Vec<EventBuffRemoved>,
+        group_follow: Vec<EventGroupFollowPayload>,
+        group_disband: Vec<EventGroupDisbandPayload>,
+        group_roster_wire: Vec<EventGroupRosterWire>,
+        group_roster_updated: Vec<EventGroupRosterState>,
+        guild_roster_updated: Vec<EventGuildRosterState>,
+        guild_roster_wire: Vec<EventGuildRosterState>,
+        guild_member_status: Vec<EventGuildMemberStatus>,
+        guild_motd_updated: Vec<EventGuildMotdState>,
+        guild_rank_names_updated: Vec<EventGuildRankNamesState>,
+        dynamic_zone_info: Vec<EventDynamicZoneInfo>,
+        dynamic_zone_switch: Vec<EventDynamicZoneSwitch>,
+        dynamic_zone_updated: Vec<EventDynamicZoneState>,
+        level_update: Vec<EventLevelUpdatePayload>,
+        enter_world: Vec<EventEnterWorld>,
+        self_stats: Vec<SelfStat>,
+        loot_rows: Vec<LootRow>,
+    }
+
     extern "Rust" {
+        type SessionProtocolRegistry;
+        fn session_protocol_registry_new(
+            protocol_dir: &str,
+        ) -> Result<Box<SessionProtocolRegistry>>;
+        fn content_hash(self: &SessionProtocolRegistry, backend: SessionBackend) -> String;
+
+        type SessionResource;
+        fn session_new(
+            registry: &SessionProtocolRegistry,
+            backend: SessionBackend,
+        ) -> Result<Box<SessionResource>>;
+        fn decode(
+            self: &mut SessionResource,
+            stream: SessionStream,
+            opcode_id: u16,
+            direction: SessionDirection,
+            payload: &[u8],
+            timestamp: i64,
+        ) -> SessionDecodeBatch;
+        fn decode_ucs(
+            self: &mut SessionResource,
+            direction: SessionDirection,
+            payload: &[u8],
+        ) -> SessionDecodeBatch;
+        fn flush(self: &mut SessionResource, reason: SessionFlushReason) -> SessionDecodeBatch;
+
         fn decode_mob_update(bytes: &[u8]) -> MobUpdate;
         fn decode_delete_spawn(bytes: &[u8]) -> DeleteSpawn;
         fn decode_spawn(bytes: &[u8]) -> Spawn;
@@ -809,7 +1798,6 @@ mod ffi {
         type EqlSelfTracker;
         fn eql_self_tracker_new() -> Box<EqlSelfTracker>;
         fn reset(self: &mut EqlSelfTracker);
-        fn self_id(self: &EqlSelfTracker) -> u32;
         fn observe_spawn(
             self: &mut EqlSelfTracker,
             player_name: &str,
@@ -823,7 +1811,6 @@ mod ffi {
         // the client's own outbound position report here — 1 = newly adopted
         // provisionally (synthesise a record for it), 0 = nothing to do.
         fn observe_self_pos(self: &mut EqlSelfTracker, spawn_id: u32) -> u8;
-        fn provisional_id(self: &EqlSelfTracker) -> u32;
         // Non-zero when a real (name-matched) adoption has superseded a
         // provisional id: drop whatever was synthesised for it.
         fn take_retired_provisional(self: &mut EqlSelfTracker) -> u32;
@@ -833,9 +1820,6 @@ mod ffi {
         // method returns the rows that COMPLETED on this event, usually none.
         type EqlLootTracker;
         fn eql_loot_tracker_new() -> Box<EqlLootTracker>;
-        fn reset(self: &mut EqlLootTracker);
-        fn set_looter(self: &mut EqlLootTracker, looter: &str);
-        fn set_zone(self: &mut EqlLootTracker, zone_short: &str) -> Vec<LootRow>;
         fn on_loot_message(
             self: &mut EqlLootTracker,
             color: u32,
@@ -872,7 +1856,6 @@ mod ffi {
         fn decode_guild_expanded_info(bytes: &[u8]) -> GuildExpandedInfo;
         fn decode_guild_member_update(bytes: &[u8]) -> GuildMemberUpdateInfo;
         fn decode_guild_roster(bytes: &[u8]) -> Vec<GuildRosterRow>;
-        fn decode_self_pos_breadcrumb(bytes: &[u8]) -> Vec<SelfPosPoint>;
         fn decode_ucs_chat(bytes: &[u8]) -> Vec<UcsChatRecord>;
         fn decode_ucs_channels(bytes: &[u8]) -> Vec<String>;
         fn decode_mob_health(bytes: &[u8]) -> MobHealth;
@@ -896,7 +1879,6 @@ mod ffi {
         fn decode_zone_change(bytes: &[u8]) -> ZoneChange;
         fn decode_dz_info(bytes: &[u8]) -> DzInfo;
         fn decode_dz_switch_info(bytes: &[u8]) -> DzSwitch;
-        fn decode_start_cast(bytes: &[u8]) -> StartCast;
         fn decode_begin_cast(bytes: &[u8]) -> BeginCast;
         fn decode_activate_ability(bytes: &[u8]) -> ActivateAbility;
         fn decode_aa_table_entry(bytes: &[u8]) -> AaTableEntry;
@@ -905,7 +1887,6 @@ mod ffi {
         fn decode_group_disband(bytes: &[u8]) -> GroupDisband;
         fn decode_group_follow(bytes: &[u8]) -> GroupFollow;
         fn decode_group_member_list(bytes: &[u8]) -> GroupMemberList;
-        fn decode_group_roster(bytes: &[u8]) -> GroupRoster;
         fn decode_corpse_loc(bytes: &[u8]) -> CorpseLoc;
         // Stage A+7
         fn decode_door(bytes: &[u8]) -> Door;
@@ -938,6 +1919,1862 @@ mod ffi {
     }
 }
 
+pub struct SessionProtocolRegistry(std::sync::Arc<seq_protocol_data::ProtocolRegistry>);
+
+fn session_protocol_registry_new(
+    protocol_dir: &str,
+) -> Result<Box<SessionProtocolRegistry>, String> {
+    let registry = if protocol_dir.is_empty() {
+        seq_protocol_data::ProtocolRegistry::embedded().map_err(|error| error.to_string())?
+    } else {
+        seq_protocol_data::ProtocolRegistry::from_directory(protocol_dir)
+            .map_err(|error| error.to_string())?
+    };
+    Ok(Box::new(SessionProtocolRegistry(std::sync::Arc::new(
+        registry,
+    ))))
+}
+
+impl SessionProtocolRegistry {
+    fn content_hash(&self, backend: ffi::SessionBackend) -> String {
+        protocol_backend(backend)
+            .map(|backend| self.0.snapshot(backend).content_hash().to_hex())
+            .unwrap_or_default()
+    }
+}
+
+pub struct SessionResource {
+    session: seq_session::Session,
+    registry: std::sync::Arc<seq_protocol_data::ProtocolRegistry>,
+    backend: seq_protocol_data::BackendId,
+}
+
+fn session_new(
+    registry: &SessionProtocolRegistry,
+    backend: ffi::SessionBackend,
+) -> Result<Box<SessionResource>, String> {
+    let backend = protocol_backend(backend)?;
+    if backend != linked_backend() {
+        return Err(format!(
+            "seq-bridge was built for {}, not {backend}",
+            linked_backend()
+        ));
+    }
+    let protocol_registry = std::sync::Arc::clone(&registry.0);
+    let session = seq_session::Session::new(seq_session::SessionConfig {
+        backend,
+        protocol_registry: std::sync::Arc::clone(&protocol_registry),
+    })
+    .map_err(|err| err.to_string())?;
+    Ok(Box::new(SessionResource {
+        session,
+        registry: protocol_registry,
+        backend,
+    }))
+}
+
+impl SessionResource {
+    fn decode(
+        &mut self,
+        stream: ffi::SessionStream,
+        opcode_id: u16,
+        direction: ffi::SessionDirection,
+        payload: &[u8],
+        timestamp: i64,
+    ) -> ffi::SessionDecodeBatch {
+        let (Some(stream), Some(direction)) =
+            (protocol_stream(stream), session_direction(direction))
+        else {
+            return self.malformed_batch();
+        };
+        let decoded = self.session.decode_at(
+            stream,
+            seq_protocol_data::OpcodeId(opcode_id),
+            direction,
+            payload,
+            timestamp,
+        );
+        let mut batch = translate_events(
+            decoded.protocol_generation.0,
+            session_disposition(decoded.disposition),
+            decoded.events,
+        );
+        self.drain_correlations(&mut batch);
+        batch
+    }
+
+    fn decode_ucs(
+        &mut self,
+        direction: ffi::SessionDirection,
+        payload: &[u8],
+    ) -> ffi::SessionDecodeBatch {
+        let Some(direction) = session_direction(direction) else {
+            return self.malformed_batch();
+        };
+        let decoded = self.session.decode_ucs(direction, payload);
+        let mut batch = translate_events(
+            decoded.protocol_generation.0,
+            session_disposition(decoded.disposition),
+            decoded.events,
+        );
+        self.drain_correlations(&mut batch);
+        batch
+    }
+
+    // Unknown cxx enum values (open on the C++ side) yield an empty batch, never a panic.
+    fn malformed_batch(&self) -> ffi::SessionDecodeBatch {
+        let generation = self.registry.snapshot(self.backend).generation().0;
+        translate_events(generation, ffi::SessionDisposition::Malformed, Vec::new())
+    }
+
+    fn flush(&mut self, reason: ffi::SessionFlushReason) -> ffi::SessionDecodeBatch {
+        let Some(reason) = session_flush_reason(reason) else {
+            return self.malformed_batch();
+        };
+        let events = self.session.flush(reason);
+        let generation = self.registry.snapshot(self.backend).generation().0;
+        let disposition = if events.is_empty() {
+            ffi::SessionDisposition::Ignored
+        } else {
+            ffi::SessionDisposition::Decoded
+        };
+        let mut batch = translate_events(generation, disposition, events);
+        self.drain_correlations(&mut batch);
+        batch
+    }
+
+    fn drain_correlations(&mut self, _batch: &mut ffi::SessionDecodeBatch) {
+        #[cfg(feature = "backend-eql")]
+        {
+            _batch.self_stats = self
+                .session
+                .take_self_stats()
+                .into_iter()
+                .map(self_stat_to_ffi)
+                .collect();
+            _batch.loot_rows = loot_rows_to_ffi(self.session.take_loot_rows());
+        }
+    }
+}
+
+fn linked_backend() -> seq_protocol_data::BackendId {
+    #[cfg(feature = "backend-live")]
+    return seq_protocol_data::BackendId::Live;
+    #[cfg(feature = "backend-test")]
+    return seq_protocol_data::BackendId::Test;
+    #[cfg(feature = "backend-eql")]
+    return seq_protocol_data::BackendId::Eql;
+}
+
+fn protocol_backend(backend: ffi::SessionBackend) -> Result<seq_protocol_data::BackendId, String> {
+    match backend {
+        ffi::SessionBackend::Live => Ok(seq_protocol_data::BackendId::Live),
+        ffi::SessionBackend::Test => Ok(seq_protocol_data::BackendId::Test),
+        ffi::SessionBackend::Eql => Ok(seq_protocol_data::BackendId::Eql),
+        other => Err(format!("unknown SessionBackend value {}", other.repr)),
+    }
+}
+
+fn protocol_stream(stream: ffi::SessionStream) -> Option<seq_protocol_data::StreamKind> {
+    match stream {
+        ffi::SessionStream::World => Some(seq_protocol_data::StreamKind::World),
+        ffi::SessionStream::Zone => Some(seq_protocol_data::StreamKind::Zone),
+        _ => None,
+    }
+}
+
+fn session_direction(direction: ffi::SessionDirection) -> Option<seq_events::Dir> {
+    match direction {
+        ffi::SessionDirection::ServerToClient => Some(seq_events::Dir::ServerToClient),
+        ffi::SessionDirection::ClientToServer => Some(seq_events::Dir::ClientToServer),
+        _ => None,
+    }
+}
+
+fn session_flush_reason(reason: ffi::SessionFlushReason) -> Option<seq_session::FlushReason> {
+    match reason {
+        ffi::SessionFlushReason::Shutdown => Some(seq_session::FlushReason::Shutdown),
+        ffi::SessionFlushReason::ZoneTransition => Some(seq_session::FlushReason::ZoneTransition),
+        ffi::SessionFlushReason::ReplayEnd => Some(seq_session::FlushReason::ReplayEnd),
+        ffi::SessionFlushReason::Reset => Some(seq_session::FlushReason::Reset),
+        _ => None,
+    }
+}
+
+fn session_disposition(disposition: seq_session::DecodeDisposition) -> ffi::SessionDisposition {
+    match disposition {
+        seq_session::DecodeDisposition::Decoded => ffi::SessionDisposition::Decoded,
+        seq_session::DecodeDisposition::Ignored => ffi::SessionDisposition::Ignored,
+        seq_session::DecodeDisposition::Unhandled => ffi::SessionDisposition::Unhandled,
+        seq_session::DecodeDisposition::Malformed => ffi::SessionDisposition::Malformed,
+        seq_session::DecodeDisposition::Unmapped => ffi::SessionDisposition::Unmapped,
+    }
+}
+
+fn event_session_reset_reason(
+    reason: seq_events::SessionResetReason,
+) -> ffi::EventSessionResetReason {
+    match reason {
+        seq_events::SessionResetReason::EnterWorld => ffi::EventSessionResetReason::EnterWorld,
+        seq_events::SessionResetReason::PlayerProfile => {
+            ffi::EventSessionResetReason::PlayerProfile
+        }
+        seq_events::SessionResetReason::ZoneTransition => {
+            ffi::EventSessionResetReason::ZoneTransition
+        }
+        seq_events::SessionResetReason::Explicit => ffi::EventSessionResetReason::Explicit,
+    }
+}
+
+fn event_chat_message_kind(kind: seq_events::ChatMessageKind) -> ffi::EventChatMessageKind {
+    match kind {
+        seq_events::ChatMessageKind::Common => ffi::EventChatMessageKind::Common,
+        seq_events::ChatMessageKind::Simple => ffi::EventChatMessageKind::Simple,
+        seq_events::ChatMessageKind::Formatted => ffi::EventChatMessageKind::Formatted,
+        seq_events::ChatMessageKind::Special => ffi::EventChatMessageKind::Special,
+        seq_events::ChatMessageKind::Loot => ffi::EventChatMessageKind::Loot,
+        seq_events::ChatMessageKind::Ucs => ffi::EventChatMessageKind::Ucs,
+    }
+}
+
+fn event_group_member(member: seq_events::GroupMember) -> ffi::EventGroupMember {
+    ffi::EventGroupMember {
+        slot: member.slot,
+        name: member.name,
+        has_level: member.level.is_some(),
+        level: member.level.unwrap_or_default(),
+    }
+}
+
+fn event_dynamic_zone_state(state: seq_events::DynamicZoneState) -> ffi::EventDynamicZoneState {
+    ffi::EventDynamicZoneState {
+        active: state.active,
+        has_zone_id: state.zone_id.is_some(),
+        zone_id: state.zone_id.unwrap_or_default(),
+        has_instance_id: state.instance_id.is_some(),
+        instance_id: state.instance_id.unwrap_or_default(),
+        has_kind: state.kind.is_some(),
+        kind: state.kind.unwrap_or_default(),
+        has_position: state.position.is_some(),
+        position: state.position.map_or(
+            ffi::EventPoint3 {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+            },
+            event_point3,
+        ),
+        has_max_players: state.max_players.is_some(),
+        max_players: state.max_players.unwrap_or_default(),
+        expedition_name: state.expedition_name,
+        leader_name: state.leader_name,
+        complete: state.complete,
+    }
+}
+
+fn event_pos(pos: seq_events::Pos) -> ffi::EventPos {
+    ffi::EventPos {
+        x: pos.x,
+        y: pos.y,
+        z: pos.z,
+        heading_deg: pos.heading_deg,
+    }
+}
+
+fn event_vital(value: Option<seq_events::VitalValue>) -> ffi::EventVitalValue {
+    let value = value.unwrap_or(seq_events::VitalValue {
+        current: 0,
+        maximum: None,
+    });
+    ffi::EventVitalValue {
+        current: value.current,
+        has_maximum: value.maximum.is_some(),
+        maximum: value.maximum.unwrap_or_default(),
+    }
+}
+
+fn event_player_identity(identity: seq_events::PlayerIdentity) -> ffi::EventPlayerIdentity {
+    ffi::EventPlayerIdentity {
+        has_spawn_id: identity.spawn_id.is_some(),
+        spawn_id: identity.spawn_id.unwrap_or_default(),
+        name: identity.name,
+        last_name: identity.last_name,
+        race: identity.race,
+        class_: identity.class_,
+        deity: identity.deity,
+        level: identity.level,
+        class_mask: identity.class_mask,
+    }
+}
+
+fn event_point3(point: seq_events::Point3) -> ffi::EventPoint3 {
+    ffi::EventPoint3 {
+        x: point.x,
+        y: point.y,
+        z: point.z,
+    }
+}
+
+fn event_velocity(velocity: seq_events::Velocity) -> ffi::EventVelocity {
+    ffi::EventVelocity {
+        has_x: velocity.x.is_some(),
+        x: velocity.x.unwrap_or_default(),
+        has_y: velocity.y.is_some(),
+        y: velocity.y.unwrap_or_default(),
+        has_z: velocity.z.is_some(),
+        z: velocity.z.unwrap_or_default(),
+    }
+}
+
+fn event_spawn_info(spawn: seq_events::SpawnInfo) -> ffi::EventSpawnInfo {
+    let (has_max_hp, max_hp) = match spawn.max_hp {
+        Some(max_hp) => (true, max_hp),
+        None => (false, 0),
+    };
+    let (has_pos, pos) = match spawn.pos {
+        Some(pos) => (true, event_pos(pos)),
+        None => (
+            false,
+            ffi::EventPos {
+                x: 0,
+                y: 0,
+                z: 0,
+                heading_deg: 0,
+            },
+        ),
+    };
+    ffi::EventSpawnInfo {
+        id: spawn.id,
+        name: spawn.name,
+        last_name: spawn.last_name,
+        race: spawn.race,
+        class_: spawn.class_,
+        deity: spawn.deity,
+        level: spawn.level,
+        npc: spawn.npc,
+        cur_hp: spawn.cur_hp,
+        has_max_hp,
+        max_hp,
+        guild_id: spawn.guild_id,
+        guild_server_id: spawn.guild_server_id,
+        class_mask: spawn.class_mask,
+        has_pos,
+        pos,
+        velocity: event_velocity(spawn.velocity),
+        has_delta_heading: spawn.delta_heading.is_some(),
+        delta_heading: spawn.delta_heading.unwrap_or_default(),
+        has_animation: spawn.animation.is_some(),
+        animation: spawn.animation.unwrap_or_default(),
+        has_equipment_models: spawn.equipment_models.is_some(),
+        equipment_models: spawn.equipment_models.map_or_else(Vec::new, <[_; 9]>::into),
+    }
+}
+
+fn event_profile(profile: seq_events::ProfileInfo) -> ffi::EventProfileInfo {
+    ffi::EventProfileInfo {
+        name: profile.name,
+        last_name: profile.last_name,
+        class_: profile.class_,
+        level: profile.level,
+        race: profile.race,
+        deity: profile.deity,
+        cur_hp: profile.cur_hp,
+        mana: profile.mana,
+        aa_ids: profile.aa_ids,
+        aa_values: profile.aa_values,
+        aa_spent: profile.aa_spent,
+        aa_assigned: profile.aa_assigned,
+        aa_unspent: profile.aa_unspent,
+        aa_experience: profile.aa_experience,
+        skills: profile.skills,
+        class_mask: profile.class_mask,
+        str_: profile.str_,
+        sta: profile.sta,
+        cha: profile.cha,
+        dex: profile.dex,
+        int_: profile.int_,
+        agi: profile.agi,
+        wis: profile.wis,
+        platinum: profile.platinum,
+        gold: profile.gold,
+        silver: profile.silver,
+        copper: profile.copper,
+    }
+}
+
+fn event_guild(guild: seq_events::GuildInZone) -> ffi::EventGuildInZone {
+    ffi::EventGuildInZone {
+        guild_id: guild.guild_id,
+        server_id: guild.server_id,
+        name: guild.name,
+    }
+}
+
+fn event_roster_member(member: seq_events::GuildRosterMember) -> ffi::EventGuildRosterMember {
+    ffi::EventGuildRosterMember {
+        name: member.name,
+        level: member.level,
+        class_: member.class,
+        class_mask: member.class_mask,
+        rank: member.rank,
+        last_on: member.last_on,
+        banker: member.banker,
+        alt: member.alt,
+        full_member: member.full_member,
+        public_note: member.public_note,
+        zone_id: member.zone_id,
+    }
+}
+
+fn event_item(item: seq_events::ItemTemplate) -> ffi::EventItemTemplate {
+    ffi::EventItemTemplate {
+        serial: item.serial,
+        name: item.name,
+        lore_name: item.lore_name,
+        item_id: item.item_id,
+        has_icon: item.icon.is_some(),
+        icon: item.icon.unwrap_or_default(),
+        has_stack_count: item.stack_count.is_some(),
+        stack_count: item.stack_count.unwrap_or_default(),
+        has_weight_tenths: item.weight_tenths.is_some(),
+        weight_tenths: item.weight_tenths.unwrap_or_default(),
+        has_flags: item.flags.is_some(),
+        flags: item.flags.unwrap_or_default(),
+        has_corruption: item.corruption.is_some(),
+        corruption: item.corruption.unwrap_or_default(),
+        slot_mask: item.slot_mask,
+        container_id: item.container_id,
+        container_slot: item.container_slot,
+        parent_slot: item.parent_slot,
+        stats: item.stats,
+        resists: item.resists,
+        hp: item.hp,
+        mana: item.mana,
+        endurance: item.endurance,
+        ac: item.ac,
+    }
+}
+
+fn empty_event_item() -> ffi::EventItemTemplate {
+    event_item(seq_events::ItemTemplate {
+        serial: String::new(),
+        name: String::new(),
+        lore_name: String::new(),
+        item_id: 0,
+        icon: None,
+        stack_count: None,
+        weight_tenths: None,
+        flags: None,
+        corruption: None,
+        slot_mask: 0,
+        container_id: 0,
+        container_slot: 0,
+        parent_slot: 0,
+        stats: Vec::new(),
+        resists: Vec::new(),
+        hp: 0,
+        mana: 0,
+        endurance: 0,
+        ac: 0,
+    })
+}
+
+fn event_door(door: seq_events::DoorInfo) -> ffi::EventDoorInfo {
+    ffi::EventDoorInfo {
+        id: door.id,
+        name: door.name,
+        position: event_point3(door.position),
+        heading: door.heading,
+        incline: door.incline,
+        size: door.size,
+        open_type: door.open_type,
+        state: door.state,
+        invert_state: door.invert_state,
+        has_zone_point_id: door.zone_point_id.is_some(),
+        zone_point_id: door.zone_point_id.unwrap_or_default(),
+    }
+}
+
+fn event_zone_point(point: seq_events::ZonePointInfo) -> ffi::EventZonePointInfo {
+    ffi::EventZonePointInfo {
+        has_trigger_id: point.trigger_id.is_some(),
+        trigger_id: point.trigger_id.unwrap_or_default(),
+        has_actor_definition: point.actor_definition.is_some(),
+        actor_definition: point.actor_definition.unwrap_or_default(),
+        position: event_point3(point.position),
+        heading: point.heading,
+        has_destination_zone_id: point.destination_zone_id.is_some(),
+        destination_zone_id: point.destination_zone_id.unwrap_or_default(),
+        has_destination_instance_id: point.destination_instance_id.is_some(),
+        destination_instance_id: point.destination_instance_id.unwrap_or_default(),
+    }
+}
+
+fn event_loot_item(item: seq_events::LootItemInfo) -> ffi::EventLootItemInfo {
+    ffi::EventLootItemInfo {
+        name: item.name,
+        icon: item.icon,
+        item_id: item.item_id,
+    }
+}
+
+fn event_buff(buff: seq_events::BuffEntry) -> ffi::EventBuffEntry {
+    ffi::EventBuffEntry {
+        spell_id: buff.spell_id,
+        remaining_ticks: buff.remaining_ticks,
+        slot: buff.slot,
+        caster: buff.caster,
+    }
+}
+
+fn event_active_buff(buff: seq_events::ActiveBuff) -> ffi::EventActiveBuff {
+    ffi::EventActiveBuff {
+        has_owner_id: buff.owner_id.is_some(),
+        owner_id: buff.owner_id.unwrap_or_default(),
+        spell_id: buff.spell_id,
+        has_remaining_ticks: buff.remaining_ticks.is_some(),
+        remaining_ticks: buff.remaining_ticks.unwrap_or_default(),
+        has_slot: buff.slot.is_some(),
+        slot: buff.slot.unwrap_or_default(),
+        has_caster_id: buff.caster_id.is_some(),
+        caster_id: buff.caster_id.unwrap_or_default(),
+        has_caster_name: buff.caster_name.is_some(),
+        caster_name: buff.caster_name.unwrap_or_default(),
+    }
+}
+
+fn event_cast_interruption_reason(
+    reason: seq_events::CastInterruptionReason,
+) -> ffi::EventCastInterruptionReason {
+    match reason {
+        seq_events::CastInterruptionReason::ServerMessage => {
+            ffi::EventCastInterruptionReason::ServerMessage
+        }
+        seq_events::CastInterruptionReason::Superseded => {
+            ffi::EventCastInterruptionReason::Superseded
+        }
+        seq_events::CastInterruptionReason::SessionReset => {
+            ffi::EventCastInterruptionReason::SessionReset
+        }
+        seq_events::CastInterruptionReason::ReplayEnd => {
+            ffi::EventCastInterruptionReason::ReplayEnd
+        }
+        seq_events::CastInterruptionReason::Shutdown => ffi::EventCastInterruptionReason::Shutdown,
+    }
+}
+
+fn push_ref(
+    batch: &mut ffi::SessionDecodeBatch,
+    kind: ffi::SessionEventKind,
+    payload_index: usize,
+) {
+    batch.events.push(ffi::SessionEventRef {
+        kind,
+        payload_index: payload_index
+            .try_into()
+            .expect("a decode batch cannot contain more than u32::MAX events"),
+    });
+}
+
+fn translate_events(
+    protocol_generation: u64,
+    disposition: ffi::SessionDisposition,
+    events: Vec<seq_events::Event>,
+) -> ffi::SessionDecodeBatch {
+    let mut batch = empty_session_batch(protocol_generation, disposition);
+    for event in events {
+        translate_event(&mut batch, event);
+    }
+    batch
+}
+
+#[allow(clippy::too_many_lines)]
+fn translate_event(batch: &mut ffi::SessionDecodeBatch, event: seq_events::Event) {
+    use seq_events::Event;
+    match event {
+        Event::SessionReset { reason } => {
+            let index = batch.session_reset.len();
+            batch.session_reset.push(ffi::EventSessionReset {
+                reason: event_session_reset_reason(reason),
+            });
+            push_ref(batch, ffi::SessionEventKind::SessionReset, index);
+        }
+        Event::PlayerIdentityUpdated(identity) => {
+            let index = batch.player_identity_updated.len();
+            batch
+                .player_identity_updated
+                .push(event_player_identity(identity));
+            push_ref(batch, ffi::SessionEventKind::PlayerIdentityUpdated, index);
+        }
+        Event::PlayerMoved { spawn_id, pos } => {
+            let index = batch.player_moved.len();
+            batch.player_moved.push(ffi::EventPlayerMoved {
+                has_spawn_id: spawn_id.is_some(),
+                spawn_id: spawn_id.unwrap_or_default(),
+                pos: event_pos(pos),
+            });
+            push_ref(batch, ffi::SessionEventKind::PlayerMoved, index);
+        }
+        Event::PlayerVitalsUpdated(vitals) => {
+            let index = batch.player_vitals_updated.len();
+            batch.player_vitals_updated.push(ffi::EventPlayerVitals {
+                has_health: vitals.health.is_some(),
+                health: event_vital(vitals.health),
+                has_mana: vitals.mana.is_some(),
+                mana: event_vital(vitals.mana),
+                has_endurance: vitals.endurance.is_some(),
+                endurance: event_vital(vitals.endurance),
+            });
+            push_ref(batch, ffi::SessionEventKind::PlayerVitalsUpdated, index);
+        }
+        Event::SpawnHealthUpdated {
+            id,
+            current,
+            maximum,
+        } => {
+            let index = batch.spawn_health_updated.len();
+            batch.spawn_health_updated.push(ffi::EventSpawnHealth {
+                id,
+                current,
+                maximum,
+            });
+            push_ref(batch, ffi::SessionEventKind::SpawnHealthUpdated, index);
+        }
+        Event::PlayerDied { killer_id } => {
+            let index = batch.player_died.len();
+            batch.player_died.push(ffi::EventPlayerDied {
+                has_killer_id: killer_id.is_some(),
+                killer_id: killer_id.unwrap_or_default(),
+            });
+            push_ref(batch, ffi::SessionEventKind::PlayerDied, index);
+        }
+        Event::SpawnDied { id, killer_id } => {
+            let index = batch.spawn_died.len();
+            batch.spawn_died.push(ffi::EventSpawnDied {
+                id,
+                has_killer_id: killer_id.is_some(),
+                killer_id: killer_id.unwrap_or_default(),
+            });
+            push_ref(batch, ffi::SessionEventKind::SpawnDied, index);
+        }
+        Event::SpawnIdentityUpdated {
+            id,
+            level,
+            class_,
+            race,
+        } => {
+            let index = batch.spawn_identity_updated.len();
+            batch.spawn_identity_updated.push(ffi::EventSpawnIdentity {
+                id,
+                level,
+                class_,
+                race,
+            });
+            push_ref(batch, ffi::SessionEventKind::SpawnIdentityUpdated, index);
+        }
+        Event::PlayerAppearanceUpdated(appearance) => {
+            let index = batch.player_appearance_updated.len();
+            batch
+                .player_appearance_updated
+                .push(ffi::EventPlayerAppearance {
+                    has_race: appearance.race.is_some(),
+                    race: appearance.race.unwrap_or_default(),
+                    has_gender: appearance.gender.is_some(),
+                    gender: appearance.gender.unwrap_or_default(),
+                    has_animation: appearance.animation.is_some(),
+                    animation: appearance.animation.unwrap_or_default(),
+                });
+            push_ref(batch, ffi::SessionEventKind::PlayerAppearanceUpdated, index);
+        }
+        Event::SpawnAdded(spawn) => {
+            let index = batch.spawn_added.len();
+            batch.spawn_added.push(event_spawn_info(spawn));
+            push_ref(batch, ffi::SessionEventKind::SpawnAdded, index);
+        }
+        Event::SpawnMoved {
+            id,
+            pos,
+            velocity,
+            delta_heading,
+            animation,
+        } => {
+            let index = batch.spawn_moved.len();
+            batch.spawn_moved.push(ffi::EventSpawnMoved {
+                id,
+                pos: event_pos(pos),
+                velocity: event_velocity(velocity),
+                has_delta_heading: delta_heading.is_some(),
+                delta_heading: delta_heading.unwrap_or_default(),
+                has_animation: animation.is_some(),
+                animation: animation.unwrap_or_default(),
+            });
+            push_ref(batch, ffi::SessionEventKind::SpawnMoved, index);
+        }
+        Event::SpawnRemoved { id } => {
+            let index = batch.spawn_removed.len();
+            batch.spawn_removed.push(ffi::EventSpawnId { id });
+            push_ref(batch, ffi::SessionEventKind::SpawnRemoved, index);
+        }
+        Event::SpawnRenamed {
+            id,
+            old_name,
+            new_name,
+        } => {
+            let index = batch.spawn_renamed.len();
+            batch.spawn_renamed.push(ffi::EventSpawnRenamed {
+                has_id: id.is_some(),
+                id: id.unwrap_or_default(),
+                old_name,
+                new_name,
+            });
+            push_ref(batch, ffi::SessionEventKind::SpawnRenamed, index);
+        }
+        Event::SpawnKilled {
+            deceased_id,
+            killer_id,
+        } => {
+            let index = batch.spawn_killed.len();
+            batch.spawn_killed.push(ffi::EventSpawnKilled {
+                deceased_id,
+                killer_id,
+            });
+            push_ref(batch, ffi::SessionEventKind::SpawnKilled, index);
+        }
+        Event::SpawnHp { id, cur, max } => {
+            let index = batch.spawn_hp.len();
+            batch.spawn_hp.push(ffi::EventSpawnHp { id, cur, max });
+            push_ref(batch, ffi::SessionEventKind::SpawnHp, index);
+        }
+        Event::StatSync {
+            spawn_id,
+            wide,
+            has_hp,
+            hp_cur,
+            hp_max,
+            has_mana,
+            mana_cur,
+            mana_max,
+            has_end,
+            end_cur,
+            end_max,
+        } => {
+            let index = batch.stat_sync.len();
+            batch.stat_sync.push(ffi::EventStatSync {
+                spawn_id,
+                wide,
+                has_hp,
+                hp_cur,
+                hp_max,
+                has_mana,
+                mana_cur,
+                mana_max,
+                has_end,
+                end_cur,
+                end_max,
+            });
+            push_ref(batch, ffi::SessionEventKind::StatSync, index);
+        }
+        Event::SelfPos {
+            pos,
+            spawn_id,
+            velocity,
+            delta_heading,
+            animation,
+        } => {
+            let index = batch.self_pos.len();
+            batch.self_pos.push(ffi::EventSelfPos {
+                pos: event_pos(pos),
+                spawn_id,
+                velocity: event_velocity(velocity),
+                has_delta_heading: delta_heading.is_some(),
+                delta_heading: delta_heading.unwrap_or_default(),
+                has_animation: animation.is_some(),
+                animation: animation.unwrap_or_default(),
+            });
+            push_ref(batch, ffi::SessionEventKind::SelfPos, index);
+        }
+        Event::SpawnAnimation {
+            spawn_id,
+            animation,
+        } => {
+            let index = batch.spawn_animation.len();
+            batch.spawn_animation.push(ffi::EventSpawnAnimation {
+                spawn_id,
+                animation,
+            });
+            push_ref(batch, ffi::SessionEventKind::SpawnAnimation, index);
+        }
+        Event::SpawnIllusion {
+            spawn_id,
+            race,
+            gender,
+        } => {
+            let index = batch.spawn_illusion.len();
+            batch.spawn_illusion.push(ffi::EventSpawnIllusion {
+                spawn_id,
+                race,
+                gender,
+            });
+            push_ref(batch, ffi::SessionEventKind::SpawnIllusion, index);
+        }
+        Event::GuildsInZone { guilds } => {
+            let index = batch.guilds_in_zone.len();
+            batch.guilds_in_zone.push(ffi::EventGuildsInZone {
+                guilds: guilds.into_iter().map(event_guild).collect(),
+            });
+            push_ref(batch, ffi::SessionEventKind::GuildsInZone, index);
+        }
+        Event::TimeOfDay {
+            year,
+            month,
+            day,
+            hour,
+            minute,
+        } => {
+            let index = batch.time_of_day.len();
+            batch.time_of_day.push(ffi::EventTimeOfDay {
+                year,
+                month,
+                day,
+                hour,
+                minute,
+            });
+            push_ref(batch, ffi::SessionEventKind::TimeOfDay, index);
+        }
+        Event::ZoneTransition {
+            character_name,
+            zone_id,
+            instance_id,
+            confirmed,
+        } => {
+            let index = batch.zone_transition.len();
+            batch.zone_transition.push(ffi::EventZoneTransition {
+                character_name,
+                has_zone_id: zone_id.is_some(),
+                zone_id: zone_id.unwrap_or_default(),
+                has_instance_id: instance_id.is_some(),
+                instance_id: instance_id.unwrap_or_default(),
+                confirmed,
+            });
+            push_ref(batch, ffi::SessionEventKind::ZoneTransition, index);
+        }
+        Event::ZoneChanged(zone) => {
+            let index = batch.zone_changed.len();
+            batch.zone_changed.push(ffi::EventZoneInfo {
+                short_name: zone.short_name,
+                long_name: zone.long_name,
+            });
+            push_ref(batch, ffi::SessionEventKind::ZoneChanged, index);
+        }
+        Event::ZoneEnvironmentChanged(environment) => {
+            let index = batch.zone_environment_changed.len();
+            batch
+                .zone_environment_changed
+                .push(ffi::EventZoneEnvironment {
+                    zone_file: environment.zone_file,
+                    experience_multiplier: environment.experience_multiplier,
+                    safe_x: environment.safe_x,
+                    safe_y: environment.safe_y,
+                    safe_z: environment.safe_z,
+                });
+            push_ref(batch, ffi::SessionEventKind::ZoneEnvironmentChanged, index);
+        }
+        Event::PlayerProfile(profile) => {
+            let index = batch.player_profile.len();
+            batch.player_profile.push(event_profile(profile));
+            push_ref(batch, ffi::SessionEventKind::PlayerProfile, index);
+        }
+        Event::Stance { name } => {
+            let index = batch.named.len();
+            batch.named.push(ffi::EventNamed { name });
+            push_ref(batch, ffi::SessionEventKind::Stance, index);
+        }
+        Event::Invocation { name } => {
+            let index = batch.named.len();
+            batch.named.push(ffi::EventNamed { name });
+            push_ref(batch, ffi::SessionEventKind::Invocation, index);
+        }
+        Event::InspectAnswer {
+            spawn_id,
+            item_names,
+            bio,
+        } => {
+            let index = batch.inspect_answer.len();
+            batch.inspect_answer.push(ffi::EventInspectAnswer {
+                spawn_id,
+                item_names,
+                bio,
+            });
+            push_ref(batch, ffi::SessionEventKind::InspectAnswer, index);
+        }
+        Event::GuildRoster { guild_id, members } => {
+            let index = batch.guild_roster.len();
+            batch.guild_roster.push(ffi::EventGuildRoster {
+                guild_id,
+                members: members.into_iter().map(event_roster_member).collect(),
+            });
+            push_ref(batch, ffi::SessionEventKind::GuildRoster, index);
+        }
+        Event::GuildRosterUpdated(state) => {
+            let index = batch.guild_roster_updated.len();
+            batch.guild_roster_updated.push(ffi::EventGuildRosterState {
+                guild_id: state.guild_id,
+                members: state.members.into_iter().map(event_roster_member).collect(),
+                complete: state.complete,
+            });
+            push_ref(batch, ffi::SessionEventKind::GuildRosterUpdated, index);
+        }
+        Event::GuildRosterWire {
+            guild_id,
+            members,
+            complete,
+        } => {
+            let index = batch.guild_roster_wire.len();
+            batch.guild_roster_wire.push(ffi::EventGuildRosterState {
+                guild_id,
+                members: members.into_iter().map(event_roster_member).collect(),
+                complete,
+            });
+            push_ref(batch, ffi::SessionEventKind::GuildRosterWire, index);
+        }
+        Event::GuildMemberStatus {
+            name,
+            zone_id,
+            instance_id,
+            last_on,
+        } => {
+            let index = batch.guild_member_status.len();
+            batch.guild_member_status.push(ffi::EventGuildMemberStatus {
+                name,
+                zone_id,
+                instance_id,
+                last_on,
+            });
+            push_ref(batch, ffi::SessionEventKind::GuildMemberStatus, index);
+        }
+        Event::ZoneServerInfo { host, port } => {
+            let index = batch.zone_server_info.len();
+            batch
+                .zone_server_info
+                .push(ffi::EventZoneServerInfo { host, port });
+            push_ref(batch, ffi::SessionEventKind::ZoneServerInfo, index);
+        }
+        Event::ItemSet { items } => {
+            let index = batch.item_set.len();
+            batch.item_set.push(ffi::EventItemSet {
+                items: items.into_iter().map(event_item).collect(),
+            });
+            push_ref(batch, ffi::SessionEventKind::ItemSet, index);
+        }
+        Event::ItemLearned { item } => {
+            let index = batch.item_learned.len();
+            batch.item_learned.push(ffi::EventItemLearned {
+                item: event_item(item),
+            });
+            push_ref(batch, ffi::SessionEventKind::ItemLearned, index);
+        }
+        Event::InventorySnapshot { items } => {
+            let index = batch.inventory_snapshot.len();
+            batch.inventory_snapshot.push(ffi::EventInventorySnapshot {
+                items: items.into_iter().map(event_item).collect(),
+            });
+            push_ref(batch, ffi::SessionEventKind::InventorySnapshot, index);
+        }
+        Event::InventoryItemUpdated {
+            item,
+            previous_location,
+        } => {
+            let index = batch.inventory_item_updated.len();
+            let has_previous_location = previous_location.is_some();
+            let previous_location = previous_location.unwrap_or(seq_events::ItemLocation {
+                container_id: 0,
+                container_slot: 0,
+                parent_slot: 0,
+            });
+            batch
+                .inventory_item_updated
+                .push(ffi::EventInventoryItemUpdated {
+                    item: event_item(item),
+                    has_previous_location,
+                    previous_location: ffi::EventItemLocation {
+                        container_id: previous_location.container_id,
+                        container_slot: previous_location.container_slot,
+                        parent_slot: previous_location.parent_slot,
+                    },
+                });
+            push_ref(batch, ffi::SessionEventKind::InventoryItemUpdated, index);
+        }
+        Event::EquipmentSnapshot { items } => {
+            let index = batch.equipment_snapshot.len();
+            batch.equipment_snapshot.push(ffi::EventEquipmentSnapshot {
+                items: items.into_iter().map(event_item).collect(),
+            });
+            push_ref(batch, ffi::SessionEventKind::EquipmentSnapshot, index);
+        }
+        Event::EquipmentSlotUpdated { slot, item } => {
+            let index = batch.equipment_slot_updated.len();
+            let has_item = item.is_some();
+            batch
+                .equipment_slot_updated
+                .push(ffi::EventEquipmentSlotUpdated {
+                    slot,
+                    has_item,
+                    item: item.map_or_else(empty_event_item, event_item),
+                });
+            push_ref(batch, ffi::SessionEventKind::EquipmentSlotUpdated, index);
+        }
+        Event::GuildMotd { message, sender } => {
+            let index = batch.guild_motd.len();
+            batch
+                .guild_motd
+                .push(ffi::EventGuildMotdPayload { message, sender });
+            push_ref(batch, ffi::SessionEventKind::GuildMotd, index);
+        }
+        Event::GuildMotdUpdated(state) => {
+            let index = batch.guild_motd_updated.len();
+            batch.guild_motd_updated.push(ffi::EventGuildMotdState {
+                guild_id: state.guild_id,
+                message: state.message,
+                sender: state.sender,
+            });
+            push_ref(batch, ffi::SessionEventKind::GuildMotdUpdated, index);
+        }
+        Event::GuildRankName {
+            guild_id,
+            rank_index,
+            rank_name,
+        } => {
+            let index = batch.guild_rank_name.len();
+            batch.guild_rank_name.push(ffi::EventGuildRankName {
+                guild_id,
+                rank_index,
+                rank_name,
+            });
+            push_ref(batch, ffi::SessionEventKind::GuildRankName, index);
+        }
+        Event::GuildRankNamesUpdated(state) => {
+            let index = batch.guild_rank_names_updated.len();
+            batch
+                .guild_rank_names_updated
+                .push(ffi::EventGuildRankNamesState {
+                    guild_id: state.guild_id,
+                    ranks: state
+                        .ranks
+                        .into_iter()
+                        .map(|rank| ffi::EventGuildRankNameEntry {
+                            rank_index: rank.rank_index,
+                            rank_name: rank.rank_name,
+                        })
+                        .collect(),
+                });
+            push_ref(batch, ffi::SessionEventKind::GuildRankNamesUpdated, index);
+        }
+        Event::LoadoutSwap {
+            spawn_id,
+            level,
+            class,
+            race,
+        } => {
+            let index = batch.loadout_swap.len();
+            batch.loadout_swap.push(ffi::EventLoadoutSwap {
+                spawn_id,
+                level,
+                class_: class,
+                race,
+            });
+            push_ref(batch, ffi::SessionEventKind::LoadoutSwap, index);
+        }
+        Event::Doors(doors) => {
+            let index = batch.doors.len();
+            batch.doors.push(ffi::EventDoors {
+                doors: doors.into_iter().map(event_door).collect(),
+            });
+            push_ref(batch, ffi::SessionEventKind::Doors, index);
+        }
+        Event::GroundItemRemoved { drop_id } => {
+            let index = batch.ground_item_removed.len();
+            batch
+                .ground_item_removed
+                .push(ffi::EventGroundItemRemoved { drop_id });
+            push_ref(batch, ffi::SessionEventKind::GroundItemRemoved, index);
+        }
+        Event::GroundItem(item) => {
+            let index = batch.ground_item.len();
+            batch.ground_item.push(ffi::EventGroundItem {
+                id: item.id,
+                actor_definition: item.actor_definition,
+                position: event_point3(item.position),
+                has_heading: item.heading.is_some(),
+                heading: item.heading.unwrap_or_default(),
+            });
+            push_ref(batch, ffi::SessionEventKind::GroundItem, index);
+        }
+        Event::CorpseLocated { id, position } => {
+            let index = batch.corpse_located.len();
+            batch.corpse_located.push(ffi::EventCorpseLocated {
+                id,
+                position: event_point3(position),
+            });
+            push_ref(batch, ffi::SessionEventKind::CorpseLocated, index);
+        }
+        Event::ZonePoints(points) => {
+            let index = batch.zone_points.len();
+            batch.zone_points.push(ffi::EventZonePoints {
+                points: points.into_iter().map(event_zone_point).collect(),
+            });
+            push_ref(batch, ffi::SessionEventKind::ZonePoints, index);
+        }
+        Event::Combat {
+            source,
+            target,
+            kind,
+            damage,
+            spell_id,
+        } => {
+            let index = batch.combat.len();
+            batch.combat.push(ffi::EventCombat {
+                source,
+                target,
+                kind,
+                damage,
+                spell_id,
+            });
+            push_ref(batch, ffi::SessionEventKind::Combat, index);
+        }
+        Event::CombatDamage {
+            source_id,
+            target_id,
+            kind,
+            damage,
+            spell_id,
+        } => {
+            let index = batch.combat_damage.len();
+            batch.combat_damage.push(ffi::EventCombatDamage {
+                has_source_id: source_id.is_some(),
+                source_id: source_id.unwrap_or_default(),
+                has_target_id: target_id.is_some(),
+                target_id: target_id.unwrap_or_default(),
+                kind,
+                damage,
+                has_spell_id: spell_id.is_some(),
+                spell_id: spell_id.unwrap_or_default(),
+            });
+            push_ref(batch, ffi::SessionEventKind::CombatDamage, index);
+        }
+        Event::SpellAction {
+            source,
+            target,
+            spell_id,
+            caster_level,
+            kind,
+        } => {
+            let index = batch.spell_action.len();
+            batch.spell_action.push(ffi::EventSpellAction {
+                source,
+                target,
+                spell_id,
+                caster_level,
+                kind,
+            });
+            push_ref(batch, ffi::SessionEventKind::SpellAction, index);
+        }
+        Event::SpellActionResolved {
+            source_id,
+            target_id,
+            spell_id,
+            caster_level,
+            kind,
+        } => {
+            let index = batch.spell_action_resolved.len();
+            batch
+                .spell_action_resolved
+                .push(ffi::EventSpellActionResolved {
+                    has_source_id: source_id.is_some(),
+                    source_id: source_id.unwrap_or_default(),
+                    has_target_id: target_id.is_some(),
+                    target_id: target_id.unwrap_or_default(),
+                    spell_id,
+                    has_caster_level: caster_level.is_some(),
+                    caster_level: caster_level.unwrap_or_default(),
+                    kind,
+                });
+            push_ref(batch, ffi::SessionEventKind::SpellActionResolved, index);
+        }
+        Event::SpellCastRequest {
+            slot,
+            spell_id,
+            target_id,
+        } => {
+            let index = batch.spell_cast_request.len();
+            batch.spell_cast_request.push(ffi::EventSpellCastRequest {
+                slot,
+                spell_id,
+                target_id,
+            });
+            push_ref(batch, ffi::SessionEventKind::SpellCastRequest, index);
+        }
+        Event::SpawnCast {
+            caster_id,
+            spell_id,
+            cast_time_ms,
+        } => {
+            let index = batch.spawn_cast.len();
+            batch.spawn_cast.push(ffi::EventSpawnCast {
+                caster_id,
+                spell_id,
+                cast_time_ms,
+            });
+            push_ref(batch, ffi::SessionEventKind::SpawnCast, index);
+        }
+        Event::SpellCastStarted {
+            caster_id,
+            target_id,
+            spell_id,
+            cast_time_ms,
+            slot,
+        } => {
+            let index = batch.spell_cast_started.len();
+            batch.spell_cast_started.push(ffi::EventSpellCastStarted {
+                has_caster_id: caster_id.is_some(),
+                caster_id: caster_id.unwrap_or_default(),
+                has_target_id: target_id.is_some(),
+                target_id: target_id.unwrap_or_default(),
+                spell_id,
+                has_cast_time_ms: cast_time_ms.is_some(),
+                cast_time_ms: cast_time_ms.unwrap_or_default(),
+                has_slot: slot.is_some(),
+                slot: slot.unwrap_or_default(),
+            });
+            push_ref(batch, ffi::SessionEventKind::SpellCastStarted, index);
+        }
+        Event::SpellCastInterrupted {
+            caster_id,
+            target_id,
+            spell_id,
+            reason,
+        } => {
+            let index = batch.spell_cast_interrupted.len();
+            batch
+                .spell_cast_interrupted
+                .push(ffi::EventSpellCastInterrupted {
+                    has_caster_id: caster_id.is_some(),
+                    caster_id: caster_id.unwrap_or_default(),
+                    has_target_id: target_id.is_some(),
+                    target_id: target_id.unwrap_or_default(),
+                    spell_id,
+                    reason: event_cast_interruption_reason(reason),
+                });
+            push_ref(batch, ffi::SessionEventKind::SpellCastInterrupted, index);
+        }
+        Event::Targeted { spawn_id } => {
+            let index = batch.spawn_id.len();
+            batch.spawn_id.push(ffi::EventSpawnId { id: spawn_id });
+            push_ref(batch, ffi::SessionEventKind::Targeted, index);
+        }
+        Event::Considered { spawn_id } => {
+            let index = batch.spawn_id.len();
+            batch.spawn_id.push(ffi::EventSpawnId { id: spawn_id });
+            push_ref(batch, ffi::SessionEventKind::Considered, index);
+        }
+        Event::AaTable { desc_id, title_sid } => {
+            let index = batch.aa_table.len();
+            batch
+                .aa_table
+                .push(ffi::EventAaTable { desc_id, title_sid });
+            push_ref(batch, ffi::SessionEventKind::AaTable, index);
+        }
+        Event::AlternateAbilityDefined(definition) => {
+            let index = batch.alternate_ability_defined.len();
+            batch
+                .alternate_ability_defined
+                .push(ffi::EventAlternateAbilityDefinition {
+                    ability_id: definition.ability_id,
+                    title_string_id: definition.title_string_id,
+                });
+            push_ref(batch, ffi::SessionEventKind::AlternateAbilityDefined, index);
+        }
+        Event::Exp { exp } => {
+            let index = batch.exp.len();
+            batch.exp.push(ffi::EventExp { exp });
+            push_ref(batch, ffi::SessionEventKind::Exp, index);
+        }
+        Event::ExperienceUpdated(progress) => {
+            let index = batch.experience_updated.len();
+            batch.experience_updated.push(ffi::EventExperienceProgress {
+                experience: progress.experience,
+                has_level: progress.level.is_some(),
+                level: progress.level.unwrap_or_default(),
+                has_previous_level: progress.previous_level.is_some(),
+                previous_level: progress.previous_level.unwrap_or_default(),
+            });
+            push_ref(batch, ffi::SessionEventKind::ExperienceUpdated, index);
+        }
+        Event::AaExp { alt_exp, aa_points } => {
+            let index = batch.aa_exp.len();
+            batch.aa_exp.push(ffi::EventAaExp { alt_exp, aa_points });
+            push_ref(batch, ffi::SessionEventKind::AaExp, index);
+        }
+        Event::AlternateAdvancementSnapshot(snapshot) => {
+            let index = batch.alternate_advancement_snapshot.len();
+            batch
+                .alternate_advancement_snapshot
+                .push(ffi::EventAlternateAdvancementSnapshot {
+                    purchased: snapshot
+                        .purchased
+                        .into_iter()
+                        .map(|rank| ffi::EventAlternateAbilityRank {
+                            ability_id: rank.ability_id,
+                            rank: rank.rank,
+                        })
+                        .collect(),
+                    has_spent_points: snapshot.spent_points.is_some(),
+                    spent_points: snapshot.spent_points.unwrap_or_default(),
+                    has_assigned_points: snapshot.assigned_points.is_some(),
+                    assigned_points: snapshot.assigned_points.unwrap_or_default(),
+                    unspent_points: snapshot.unspent_points,
+                    experience: snapshot.experience,
+                });
+            push_ref(
+                batch,
+                ffi::SessionEventKind::AlternateAdvancementSnapshot,
+                index,
+            );
+        }
+        Event::AlternateAdvancementUpdated(progress) => {
+            let index = batch.alternate_advancement_updated.len();
+            batch
+                .alternate_advancement_updated
+                .push(ffi::EventAlternateAdvancementProgress {
+                    experience: progress.experience,
+                    unspent_points: progress.unspent_points,
+                });
+            push_ref(
+                batch,
+                ffi::SessionEventKind::AlternateAdvancementUpdated,
+                index,
+            );
+        }
+        Event::Stamina { food, water } => {
+            let index = batch.stamina.len();
+            batch.stamina.push(ffi::EventStaminaPayload { food, water });
+            push_ref(batch, ffi::SessionEventKind::Stamina, index);
+        }
+        Event::ManaUpdate { mana } => {
+            let index = batch.mana_update.len();
+            batch.mana_update.push(ffi::EventManaUpdate { mana });
+            push_ref(batch, ffi::SessionEventKind::ManaUpdate, index);
+        }
+        Event::SkillUpdate { skill_id, value } => {
+            let index = batch.skill_update.len();
+            batch
+                .skill_update
+                .push(ffi::EventSkillUpdatePayload { skill_id, value });
+            push_ref(batch, ffi::SessionEventKind::SkillUpdate, index);
+        }
+        Event::SkillsSnapshot { skills } => {
+            let index = batch.skills_snapshot.len();
+            batch.skills_snapshot.push(ffi::EventSkillsSnapshot {
+                skills: skills
+                    .into_iter()
+                    .map(|skill| ffi::EventSkillValue {
+                        skill_id: skill.skill_id,
+                        value: skill.value,
+                    })
+                    .collect(),
+            });
+            push_ref(batch, ffi::SessionEventKind::SkillsSnapshot, index);
+        }
+        Event::SkillValueUpdated(skill) => {
+            let index = batch.skill_value_updated.len();
+            batch.skill_value_updated.push(ffi::EventSkillValue {
+                skill_id: skill.skill_id,
+                value: skill.value,
+            });
+            push_ref(batch, ffi::SessionEventKind::SkillValueUpdated, index);
+        }
+        Event::LootTransaction {
+            corpse_id,
+            item_id,
+            quantity,
+            coin_copper,
+            from_corpse,
+        } => {
+            let index = batch.loot_transaction.len();
+            batch
+                .loot_transaction
+                .push(ffi::EventLootTransactionPayload {
+                    corpse_id,
+                    item_id,
+                    quantity,
+                    coin_copper,
+                    from_corpse,
+                });
+            push_ref(batch, ffi::SessionEventKind::LootTransaction, index);
+        }
+        Event::LootDrops {
+            corpse_id,
+            corpse_name,
+            items,
+        } => {
+            let index = batch.loot_drops.len();
+            batch.loot_drops.push(ffi::EventLootDropsPayload {
+                corpse_id,
+                corpse_name,
+                items: items.into_iter().map(event_loot_item).collect(),
+            });
+            push_ref(batch, ffi::SessionEventKind::LootDrops, index);
+        }
+        Event::CorpseLootSnapshot(snapshot) => {
+            let index = batch.corpse_loot_snapshot.len();
+            batch
+                .corpse_loot_snapshot
+                .push(ffi::EventCorpseLootSnapshot {
+                    timestamp: snapshot.timestamp,
+                    corpse_id: snapshot.corpse_id,
+                    corpse_name: snapshot.corpse_name,
+                    corpse_name_normalized: snapshot.corpse_name_normalized,
+                    zone_short: snapshot.zone_short,
+                    zone_base: snapshot.zone_base,
+                    instance: snapshot.instance,
+                    looter: snapshot.looter,
+                    items: snapshot.items.into_iter().map(event_loot_item).collect(),
+                });
+            push_ref(batch, ffi::SessionEventKind::CorpseLootSnapshot, index);
+        }
+        Event::LootAcquired(acquisition) => {
+            let index = batch.loot_acquired.len();
+            batch.loot_acquired.push(ffi::EventLootAcquisition {
+                timestamp: acquisition.timestamp,
+                item_name: acquisition.item_name,
+                has_item_id: acquisition.item_id.is_some(),
+                item_id: acquisition.item_id.unwrap_or_default(),
+                quantity: acquisition.quantity,
+                corpse_name: acquisition.corpse_name,
+                corpse_name_normalized: acquisition.corpse_name_normalized,
+                has_corpse_id: acquisition.corpse_id.is_some(),
+                corpse_id: acquisition.corpse_id.unwrap_or_default(),
+                zone_short: acquisition.zone_short,
+                zone_base: acquisition.zone_base,
+                instance: acquisition.instance,
+                sold: acquisition.sold,
+                coin_copper: acquisition.coin_copper,
+                disposition: acquisition.disposition,
+                looter: acquisition.looter,
+                has_sequence: acquisition.sequence.is_some(),
+                sequence: acquisition.sequence.unwrap_or_default(),
+                from_corpse: acquisition.from_corpse,
+                complete: acquisition.complete,
+            });
+            push_ref(batch, ffi::SessionEventKind::LootAcquired, index);
+        }
+        Event::Money {
+            platinum,
+            gold,
+            silver,
+            copper,
+        } => {
+            let index = batch.money.len();
+            batch.money.push(ffi::EventMoney {
+                platinum,
+                gold,
+                silver,
+                copper,
+            });
+            push_ref(batch, ffi::SessionEventKind::Money, index);
+        }
+        Event::MoneyBalanceUpdated(balance) => {
+            let index = batch.money_balance_updated.len();
+            batch.money_balance_updated.push(ffi::EventMoneyBalance {
+                platinum: balance.platinum,
+                gold: balance.gold,
+                silver: balance.silver,
+                copper: balance.copper,
+            });
+            push_ref(batch, ffi::SessionEventKind::MoneyBalanceUpdated, index);
+        }
+        Event::SimpleMessage { format_id, color } => {
+            let index = batch.simple_message.len();
+            batch
+                .simple_message
+                .push(ffi::EventSimpleMessagePayload { format_id, color });
+            push_ref(batch, ffi::SessionEventKind::SimpleMessage, index);
+        }
+        Event::FormattedMessage {
+            format_id,
+            color,
+            args,
+        } => {
+            let index = batch.formatted_message.len();
+            batch
+                .formatted_message
+                .push(ffi::EventFormattedMessagePayload {
+                    format_id,
+                    color,
+                    args,
+                });
+            push_ref(batch, ffi::SessionEventKind::FormattedMessage, index);
+        }
+        Event::SpecialMessage {
+            color,
+            target,
+            source,
+            message,
+        } => {
+            let index = batch.special_message.len();
+            batch.special_message.push(ffi::EventSpecialMessagePayload {
+                color,
+                target,
+                source,
+                message,
+            });
+            push_ref(batch, ffi::SessionEventKind::SpecialMessage, index);
+        }
+        Event::LootMessage {
+            color,
+            text,
+            item_id,
+            item_name,
+        } => {
+            let index = batch.loot_message.len();
+            batch.loot_message.push(ffi::EventLootMessagePayload {
+                color,
+                text,
+                item_id,
+                item_name,
+            });
+            push_ref(batch, ffi::SessionEventKind::LootMessage, index);
+        }
+        Event::Chat {
+            channel,
+            from,
+            target,
+            text,
+            chat_color,
+            channel_name,
+        } => {
+            let index = batch.chat.len();
+            batch.chat.push(ffi::EventChat {
+                channel,
+                from,
+                target,
+                text,
+                chat_color,
+                channel_name,
+            });
+            push_ref(batch, ffi::SessionEventKind::Chat, index);
+        }
+        Event::ChatMessage(message) => {
+            let index = batch.chat_message.len();
+            batch.chat_message.push(ffi::EventChatMessage {
+                kind: event_chat_message_kind(message.kind),
+                channel: message.channel,
+                from: message.from,
+                target: message.target,
+                text: message.text,
+                chat_color: message.chat_color,
+                channel_name: message.channel_name,
+                has_format_id: message.format_id.is_some(),
+                format_id: message.format_id.unwrap_or_default(),
+                args: message.args,
+            });
+            push_ref(batch, ffi::SessionEventKind::ChatMessage, index);
+        }
+        Event::UcsRecord {
+            channel_first,
+            channel_rest,
+            channel_run,
+            sender,
+            message,
+            spam,
+        } => {
+            let index = batch.ucs_record.len();
+            batch.ucs_record.push(ffi::EventUcsRecord {
+                channel_first,
+                channel_rest,
+                channel_run,
+                sender,
+                message,
+                spam,
+            });
+            push_ref(batch, ffi::SessionEventKind::UcsRecord, index);
+        }
+        Event::BuffList { owner, entries } => {
+            let index = batch.buff_list.len();
+            batch.buff_list.push(ffi::EventBuffList {
+                owner,
+                entries: entries.into_iter().map(event_buff).collect(),
+            });
+            push_ref(batch, ffi::SessionEventKind::BuffList, index);
+        }
+        Event::BuffWire {
+            spawn_id,
+            spell_id,
+            form,
+            slot,
+            duration_ticks,
+            change_type,
+        } => {
+            let index = batch.buff_wire.len();
+            batch.buff_wire.push(ffi::EventBuffWire {
+                spawn_id,
+                spell_id,
+                form,
+                slot,
+                duration_ticks,
+                change_type,
+            });
+            push_ref(batch, ffi::SessionEventKind::BuffWire, index);
+        }
+        Event::BuffAdded(buff) => {
+            let index = batch.buff_added.len();
+            batch.buff_added.push(event_active_buff(buff));
+            push_ref(batch, ffi::SessionEventKind::BuffAdded, index);
+        }
+        Event::BuffUpdated(buff) => {
+            let index = batch.buff_updated.len();
+            batch.buff_updated.push(event_active_buff(buff));
+            push_ref(batch, ffi::SessionEventKind::BuffUpdated, index);
+        }
+        Event::BuffRemoved {
+            owner_id,
+            spell_id,
+            slot,
+        } => {
+            let index = batch.buff_removed.len();
+            batch.buff_removed.push(ffi::EventBuffRemoved {
+                has_owner_id: owner_id.is_some(),
+                owner_id: owner_id.unwrap_or_default(),
+                spell_id,
+                has_slot: slot.is_some(),
+                slot: slot.unwrap_or_default(),
+            });
+            push_ref(batch, ffi::SessionEventKind::BuffRemoved, index);
+        }
+        Event::GroupFollow { name, level } => {
+            let index = batch.group_follow.len();
+            batch
+                .group_follow
+                .push(ffi::EventGroupFollowPayload { name, level });
+            push_ref(batch, ffi::SessionEventKind::GroupFollow, index);
+        }
+        Event::GroupDisband {
+            yourname,
+            membername,
+        } => {
+            let index = batch.group_disband.len();
+            batch.group_disband.push(ffi::EventGroupDisbandPayload {
+                yourname,
+                membername,
+            });
+            push_ref(batch, ffi::SessionEventKind::GroupDisband, index);
+        }
+        Event::GroupRosterWire {
+            group_id,
+            member_count,
+            names,
+            complete,
+        } => {
+            let index = batch.group_roster_wire.len();
+            batch.group_roster_wire.push(ffi::EventGroupRosterWire {
+                group_id,
+                member_count,
+                names,
+                complete,
+            });
+            push_ref(batch, ffi::SessionEventKind::GroupRosterWire, index);
+        }
+        Event::GroupRosterUpdated(state) => {
+            let index = batch.group_roster_updated.len();
+            batch.group_roster_updated.push(ffi::EventGroupRosterState {
+                has_group_id: state.group_id.is_some(),
+                group_id: state.group_id.unwrap_or_default(),
+                members: state.members.into_iter().map(event_group_member).collect(),
+                complete: state.complete,
+            });
+            push_ref(batch, ffi::SessionEventKind::GroupRosterUpdated, index);
+        }
+        Event::DynamicZoneInfo {
+            active,
+            max_players,
+            expedition_name,
+            leader_name,
+        } => {
+            let index = batch.dynamic_zone_info.len();
+            batch.dynamic_zone_info.push(ffi::EventDynamicZoneInfo {
+                active,
+                max_players,
+                expedition_name,
+                leader_name,
+            });
+            push_ref(batch, ffi::SessionEventKind::DynamicZoneInfo, index);
+        }
+        Event::DynamicZoneSwitch {
+            active,
+            zone_id,
+            instance_id,
+            kind,
+            position,
+        } => {
+            let index = batch.dynamic_zone_switch.len();
+            batch.dynamic_zone_switch.push(ffi::EventDynamicZoneSwitch {
+                active,
+                has_zone_id: zone_id.is_some(),
+                zone_id: zone_id.unwrap_or_default(),
+                has_instance_id: instance_id.is_some(),
+                instance_id: instance_id.unwrap_or_default(),
+                has_kind: kind.is_some(),
+                kind: kind.unwrap_or_default(),
+                has_position: position.is_some(),
+                position: position.map_or(
+                    ffi::EventPoint3 {
+                        x: 0.0,
+                        y: 0.0,
+                        z: 0.0,
+                    },
+                    event_point3,
+                ),
+            });
+            push_ref(batch, ffi::SessionEventKind::DynamicZoneSwitch, index);
+        }
+        Event::DynamicZoneUpdated(state) => {
+            let index = batch.dynamic_zone_updated.len();
+            batch
+                .dynamic_zone_updated
+                .push(event_dynamic_zone_state(state));
+            push_ref(batch, ffi::SessionEventKind::DynamicZoneUpdated, index);
+        }
+        Event::LevelUpdate {
+            level,
+            level_old,
+            exp,
+        } => {
+            let index = batch.level_update.len();
+            batch.level_update.push(ffi::EventLevelUpdatePayload {
+                level,
+                level_old,
+                exp,
+            });
+            push_ref(batch, ffi::SessionEventKind::LevelUpdate, index);
+        }
+        Event::EnterWorld { character_name } => {
+            let index = batch.enter_world.len();
+            batch
+                .enter_world
+                .push(ffi::EventEnterWorld { character_name });
+            push_ref(batch, ffi::SessionEventKind::EnterWorld, index);
+        }
+    }
+}
+
+fn empty_session_batch(
+    protocol_generation: u64,
+    disposition: ffi::SessionDisposition,
+) -> ffi::SessionDecodeBatch {
+    ffi::SessionDecodeBatch {
+        protocol_generation,
+        disposition,
+        events: Vec::new(),
+        player_identity_updated: Vec::new(),
+        player_moved: Vec::new(),
+        player_vitals_updated: Vec::new(),
+        spawn_health_updated: Vec::new(),
+        player_died: Vec::new(),
+        spawn_died: Vec::new(),
+        spawn_identity_updated: Vec::new(),
+        player_appearance_updated: Vec::new(),
+        spawn_added: Vec::new(),
+        spawn_moved: Vec::new(),
+        spawn_removed: Vec::new(),
+        spawn_renamed: Vec::new(),
+        spawn_killed: Vec::new(),
+        spawn_hp: Vec::new(),
+        stat_sync: Vec::new(),
+        self_pos: Vec::new(),
+        spawn_animation: Vec::new(),
+        spawn_illusion: Vec::new(),
+        guilds_in_zone: Vec::new(),
+        time_of_day: Vec::new(),
+        zone_changed: Vec::new(),
+        session_reset: Vec::new(),
+        zone_transition: Vec::new(),
+        zone_environment_changed: Vec::new(),
+        player_profile: Vec::new(),
+        named: Vec::new(),
+        inspect_answer: Vec::new(),
+        guild_roster: Vec::new(),
+        guild_roster_updated: Vec::new(),
+        guild_roster_wire: Vec::new(),
+        guild_member_status: Vec::new(),
+        zone_server_info: Vec::new(),
+        item_set: Vec::new(),
+        item_learned: Vec::new(),
+        inventory_snapshot: Vec::new(),
+        inventory_item_updated: Vec::new(),
+        equipment_snapshot: Vec::new(),
+        equipment_slot_updated: Vec::new(),
+        guild_motd: Vec::new(),
+        guild_motd_updated: Vec::new(),
+        guild_rank_name: Vec::new(),
+        guild_rank_names_updated: Vec::new(),
+        loadout_swap: Vec::new(),
+        doors: Vec::new(),
+        ground_item_removed: Vec::new(),
+        ground_item: Vec::new(),
+        corpse_located: Vec::new(),
+        zone_points: Vec::new(),
+        combat: Vec::new(),
+        combat_damage: Vec::new(),
+        spell_action: Vec::new(),
+        spell_action_resolved: Vec::new(),
+        spell_cast_request: Vec::new(),
+        spawn_cast: Vec::new(),
+        spell_cast_started: Vec::new(),
+        spell_cast_interrupted: Vec::new(),
+        spawn_id: Vec::new(),
+        aa_table: Vec::new(),
+        alternate_ability_defined: Vec::new(),
+        exp: Vec::new(),
+        experience_updated: Vec::new(),
+        aa_exp: Vec::new(),
+        alternate_advancement_snapshot: Vec::new(),
+        alternate_advancement_updated: Vec::new(),
+        stamina: Vec::new(),
+        mana_update: Vec::new(),
+        skill_update: Vec::new(),
+        skills_snapshot: Vec::new(),
+        skill_value_updated: Vec::new(),
+        loot_transaction: Vec::new(),
+        loot_drops: Vec::new(),
+        corpse_loot_snapshot: Vec::new(),
+        loot_acquired: Vec::new(),
+        money: Vec::new(),
+        money_balance_updated: Vec::new(),
+        simple_message: Vec::new(),
+        formatted_message: Vec::new(),
+        special_message: Vec::new(),
+        loot_message: Vec::new(),
+        chat: Vec::new(),
+        chat_message: Vec::new(),
+        ucs_record: Vec::new(),
+        buff_list: Vec::new(),
+        buff_wire: Vec::new(),
+        buff_added: Vec::new(),
+        buff_updated: Vec::new(),
+        buff_removed: Vec::new(),
+        group_follow: Vec::new(),
+        group_disband: Vec::new(),
+        group_roster_wire: Vec::new(),
+        group_roster_updated: Vec::new(),
+        dynamic_zone_info: Vec::new(),
+        dynamic_zone_switch: Vec::new(),
+        dynamic_zone_updated: Vec::new(),
+        level_update: Vec::new(),
+        enter_world: Vec::new(),
+        self_stats: Vec::new(),
+        loot_rows: Vec::new(),
+    }
+}
+
 fn struct_size_overrides() -> Vec<ffi::StructSize> {
     // The daemon's SZC_Match size table is built from Live's C++ `sizeof`
     // (s_everquest.h); these entries let the linked backend override any name
@@ -960,10 +3797,9 @@ fn door_stride() -> usize {
 }
 
 fn decode_mob_update(bytes: &[u8]) -> ffi::MobUpdate {
-    // eql's OP_MobUpdate is byte-identical to Live's spawnPositionUpdate
-    // (14B, packed y:19/z:19/u3:7/x:19/heading:12 fixed-point ×8; verified
-    // 2026-07-08 over 1665 packets — 19-bit sign-fill consistent on every
-    // axis), so every backend shares the Live parser here.
+    // Each compiled backend supplies its own parser. EQL retained the packed
+    // coordinate bits but moved the block from byte 4 to byte 8 on 2026-08-25,
+    // increasing its payload from 14 to 18 bytes.
     match backend::parse_mob_update(bytes) {
         Ok(m) => ffi::MobUpdate {
             spawn_id: m.spawn_id,
@@ -1135,10 +3971,6 @@ impl EqlSelfTracker {
         self.0.reset();
     }
 
-    fn self_id(&self) -> u32 {
-        self.0.self_id()
-    }
-
     fn observe_spawn(&mut self, player_name: &str, spawn_name: &str, spawn_id: u32) -> u8 {
         self.0.observe_spawn(player_name, spawn_name, spawn_id) as u8
     }
@@ -1168,10 +4000,6 @@ impl EqlSelfTracker {
         self.0.observe_self_pos(spawn_id) as u8
     }
 
-    fn provisional_id(&self) -> u32 {
-        self.0.provisional_id()
-    }
-
     fn take_retired_provisional(&mut self) -> u32 {
         self.0.take_retired_provisional()
     }
@@ -1186,9 +4014,6 @@ fn eql_self_tracker_new() -> Box<EqlSelfTracker> {
 #[cfg(not(feature = "backend-eql"))]
 impl EqlSelfTracker {
     fn reset(&mut self) {}
-    fn self_id(&self) -> u32 {
-        0
-    }
     fn observe_spawn(&mut self, _player_name: &str, _spawn_name: &str, _spawn_id: u32) -> u8 {
         0
     }
@@ -1199,9 +4024,6 @@ impl EqlSelfTracker {
         self_stat_none()
     }
     fn observe_self_pos(&mut self, _spawn_id: u32) -> u8 {
-        0
-    }
-    fn provisional_id(&self) -> u32 {
         0
     }
     fn take_retired_provisional(&mut self) -> u32 {
@@ -1243,21 +4065,13 @@ fn loot_rows_to_ffi(rows: Vec<seq_backend_eql::LootRow>) -> Vec<ffi::LootRow> {
             disposition: r.disposition,
             looter: r.looter,
             sequence: r.sequence,
+            complete: r.complete,
         })
         .collect()
 }
 
 #[cfg(feature = "backend-eql")]
 impl EqlLootTracker {
-    fn reset(&mut self) {
-        self.0.reset();
-    }
-    fn set_looter(&mut self, looter: &str) {
-        self.0.set_looter(looter);
-    }
-    fn set_zone(&mut self, zone_short: &str) -> Vec<ffi::LootRow> {
-        loot_rows_to_ffi(self.0.set_zone(zone_short))
-    }
     fn on_loot_message(
         &mut self,
         color: u32,
@@ -1309,11 +4123,6 @@ fn eql_loot_tracker_new() -> Box<EqlLootTracker> {
 
 #[cfg(not(feature = "backend-eql"))]
 impl EqlLootTracker {
-    fn reset(&mut self) {}
-    fn set_looter(&mut self, _looter: &str) {}
-    fn set_zone(&mut self, _zone_short: &str) -> Vec<ffi::LootRow> {
-        Vec::new()
-    }
     fn on_loot_message(
         &mut self,
         _color: u32,
@@ -1799,28 +4608,6 @@ fn decode_buff_list(bytes: &[u8]) -> Vec<ffi::BuffListEntry> {
 
 #[cfg(not(feature = "backend-eql"))]
 fn decode_buff_list(_bytes: &[u8]) -> Vec<ffi::BuffListEntry> {
-    Vec::new()
-}
-
-// eql-only: OP_SelfPosEQL — the local player's position-history
-// breadcrumb, flattened to ordered points (empty = decode failed / not present).
-// live/test stub empty.
-#[cfg(feature = "backend-eql")]
-fn decode_self_pos_breadcrumb(bytes: &[u8]) -> Vec<ffi::SelfPosPoint> {
-    seq_backend_eql::parse_self_pos_breadcrumb(bytes)
-        .points
-        .into_iter()
-        .map(|p| ffi::SelfPosPoint {
-            x: p.x,
-            y: p.y,
-            z: p.z,
-            ts: p.ts,
-        })
-        .collect()
-}
-
-#[cfg(not(feature = "backend-eql"))]
-fn decode_self_pos_breadcrumb(_bytes: &[u8]) -> Vec<ffi::SelfPosPoint> {
     Vec::new()
 }
 
@@ -2365,23 +5152,6 @@ fn decode_dz_switch_info(bytes: &[u8]) -> ffi::DzSwitch {
     }
 }
 
-fn decode_start_cast(bytes: &[u8]) -> ffi::StartCast {
-    match backend::parse_start_cast(bytes) {
-        Ok(s) => ffi::StartCast {
-            slot: s.slot,
-            spell_id: s.spell_id,
-            target_id: s.target_id,
-            ok: true,
-        },
-        Err(_) => ffi::StartCast {
-            slot: 0,
-            spell_id: 0,
-            target_id: 0,
-            ok: false,
-        },
-    }
-}
-
 fn decode_action(bytes: &[u8]) -> ffi::Action {
     match backend::parse_action(bytes) {
         Ok(a) => ffi::Action {
@@ -2449,31 +5219,6 @@ fn decode_group_follow(bytes: &[u8]) -> ffi::GroupFollow {
             name: String::new(),
             ok: false,
         },
-    }
-}
-
-// OP_GroupUpdate full roster — eql-only (the legends variable-length format).
-#[cfg(feature = "backend-eql")]
-fn decode_group_roster(bytes: &[u8]) -> ffi::GroupRoster {
-    match seq_backend_eql::parse_group_roster(bytes) {
-        Ok(g) => ffi::GroupRoster {
-            group_id: g.group_id,
-            names: g.members.join("\n"),
-            ok: true,
-        },
-        Err(_) => ffi::GroupRoster {
-            group_id: 0,
-            names: String::new(),
-            ok: false,
-        },
-    }
-}
-#[cfg(not(feature = "backend-eql"))]
-fn decode_group_roster(_bytes: &[u8]) -> ffi::GroupRoster {
-    ffi::GroupRoster {
-        group_id: 0,
-        names: String::new(),
-        ok: false,
     }
 }
 
@@ -3039,7 +5784,7 @@ mod tests {
 
     #[test]
     fn roundtrip_zero_payload() {
-        let r = decode_mob_update(&[0u8; 14]);
+        let r = decode_mob_update(&[0u8; backend::mob_update::PAYLOAD_LEN]);
         assert!(r.ok);
         assert_eq!(r.spawn_id, 0);
         assert_eq!(r.x, 0);
@@ -3047,7 +5792,7 @@ mod tests {
 
     #[test]
     fn bad_length_returns_ok_false() {
-        let r = decode_mob_update(&[0u8; 13]);
+        let r = decode_mob_update(&[0u8; backend::mob_update::PAYLOAD_LEN - 1]);
         assert!(!r.ok);
     }
 
@@ -3065,3 +5810,6 @@ mod tests {
         assert!(!r.ok);
     }
 }
+
+#[cfg(test)]
+mod session_tests;

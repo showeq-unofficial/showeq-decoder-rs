@@ -1,0 +1,547 @@
+# Event names come from seq_events::Event. This file adds migration policy.
+# Run: python3 tools/event_coverage.py generate
+
+[[events]]
+name = "SessionReset"
+family = "lifecycle"
+internal_only = false
+projection_required = false
+projection_not_applicable_reason = "Session reset controls host state and has no standalone seq.v1 payload."
+
+[[events]]
+name = "PlayerIdentityUpdated"
+family = "player"
+internal_only = false
+
+[[events]]
+name = "PlayerMoved"
+family = "player"
+internal_only = false
+
+[[events]]
+name = "PlayerVitalsUpdated"
+family = "player"
+internal_only = false
+
+[[events]]
+name = "SpawnHealthUpdated"
+family = "entities_spatial"
+internal_only = false
+
+[[events]]
+name = "PlayerDied"
+family = "player"
+internal_only = false
+
+[[events]]
+name = "SpawnDied"
+family = "entities_spatial"
+internal_only = false
+
+[[events]]
+name = "SpawnIdentityUpdated"
+family = "entities_spatial"
+internal_only = false
+
+[[events]]
+name = "PlayerAppearanceUpdated"
+family = "player"
+internal_only = false
+
+[[events]]
+name = "SpawnAdded"
+family = "entities_spatial"
+internal_only = false
+
+[[events]]
+name = "SpawnMoved"
+family = "entities_spatial"
+internal_only = false
+
+[[events]]
+name = "SpawnRemoved"
+family = "entities_spatial"
+internal_only = false
+
+[[events]]
+name = "SpawnRenamed"
+family = "entities_spatial"
+internal_only = false
+
+[[events]]
+name = "SpawnKilled"
+family = "entities_spatial"
+internal_only = true
+internal_only_reason = "The ordered session converts it to PlayerDied or SpawnDied before host projection."
+
+[[events]]
+name = "SpawnHp"
+family = "entities_spatial"
+internal_only = true
+internal_only_reason = "The ordered session converts it to PlayerVitalsUpdated or SpawnHealthUpdated."
+
+[[events]]
+name = "StatSync"
+family = "player"
+internal_only = true
+internal_only_reason = "The ordered session resolves self ownership and emits PlayerVitalsUpdated or SpawnHealthUpdated."
+
+[[events]]
+name = "SelfPos"
+family = "player"
+internal_only = true
+internal_only_reason = "The ordered session resolves the local player and emits PlayerMoved."
+
+[[events]]
+name = "SpawnAnimation"
+family = "entities_spatial"
+internal_only = false
+
+[[events]]
+name = "SpawnIllusion"
+family = "entities_spatial"
+internal_only = false
+
+[[events]]
+name = "GuildsInZone"
+family = "communication_social"
+internal_only = false
+
+[[events]]
+name = "TimeOfDay"
+family = "lifecycle"
+internal_only = false
+
+[[events]]
+name = "ZoneTransition"
+family = "lifecycle"
+internal_only = false
+projection_required = false
+projection_not_applicable_reason = "Zone transition controls zoning state; ZoneChanged owns the public zone payload."
+
+[[events]]
+name = "ZoneChanged"
+family = "lifecycle"
+internal_only = false
+
+[[events]]
+name = "ZoneEnvironmentChanged"
+family = "lifecycle"
+internal_only = false
+projection_required = false
+projection_not_applicable_reason = "Zone environment enriches host zone state and has no standalone seq.v1 payload."
+
+[[events]]
+name = "PlayerProfile"
+family = "player"
+internal_only = false
+projection_required = false
+projection_not_applicable_reason = "The profile seeds host state that final semantic events expose through existing seq.v1 payloads."
+
+[[events]]
+name = "Stance"
+family = "player"
+internal_only = false
+
+[[events]]
+name = "Invocation"
+family = "player"
+internal_only = false
+
+[[events]]
+name = "InspectAnswer"
+family = "player"
+internal_only = false
+
+[[events]]
+name = "GuildRoster"
+family = "communication_social"
+internal_only = false
+
+[[events]]
+name = "GuildRosterWire"
+family = "communication_social"
+internal_only = true
+internal_only_reason = "The ordered session applies completeness rules and emits GuildRosterUpdated."
+
+[[events]]
+name = "GuildRosterUpdated"
+family = "communication_social"
+internal_only = false
+
+[[events]]
+name = "GuildMemberStatus"
+family = "communication_social"
+internal_only = true
+internal_only_reason = "The ordered session folds the member delta into GuildRosterUpdated."
+
+[[events]]
+name = "ZoneServerInfo"
+family = "lifecycle"
+internal_only = false
+
+[[events]]
+name = "ItemSet"
+family = "items_progression"
+internal_only = false
+
+[[events]]
+name = "ItemLearned"
+family = "items_progression"
+internal_only = false
+
+[[events]]
+name = "InventorySnapshot"
+family = "items_progression"
+internal_only = false
+
+[[events]]
+name = "InventoryItemUpdated"
+family = "items_progression"
+internal_only = false
+
+[[events]]
+name = "EquipmentSnapshot"
+family = "items_progression"
+internal_only = false
+
+[[events]]
+name = "EquipmentSlotUpdated"
+family = "items_progression"
+internal_only = false
+
+[[events]]
+name = "GuildMotd"
+family = "communication_social"
+internal_only = true
+internal_only_reason = "The ordered session resolves the guild id and emits GuildMotdUpdated."
+
+[[events]]
+name = "GuildMotdUpdated"
+family = "communication_social"
+internal_only = false
+
+[[events]]
+name = "GuildRankName"
+family = "communication_social"
+internal_only = true
+internal_only_reason = "The ordered session accumulates the rank table and emits GuildRankNamesUpdated."
+
+[[events]]
+name = "GuildRankNamesUpdated"
+family = "communication_social"
+internal_only = false
+
+[[events]]
+name = "LoadoutSwap"
+family = "player"
+internal_only = true
+internal_only_reason = "The ordered session resolves self ownership and emits PlayerIdentityUpdated or SpawnIdentityUpdated."
+
+[[events]]
+name = "Doors"
+family = "entities_spatial"
+internal_only = false
+
+[[events]]
+name = "GroundItemRemoved"
+family = "entities_spatial"
+internal_only = false
+
+[[events]]
+name = "GroundItem"
+family = "entities_spatial"
+internal_only = false
+
+[[events]]
+name = "CorpseLocated"
+family = "entities_spatial"
+internal_only = false
+
+[[events]]
+name = "ZonePoints"
+family = "entities_spatial"
+internal_only = false
+projection_required = false
+projection_not_applicable_reason = "Zone points are host navigation state and have no standalone seq.v1 payload."
+
+[[events]]
+name = "Combat"
+family = "combat_spells"
+internal_only = true
+internal_only_reason = "The ordered session normalizes wire sentinels and emits CombatDamage."
+
+[[events]]
+name = "CombatDamage"
+family = "combat_spells"
+internal_only = false
+
+[[events]]
+name = "SpellAction"
+family = "combat_spells"
+internal_only = true
+internal_only_reason = "The ordered session correlates casting state and emits SpellActionResolved."
+
+[[events]]
+name = "SpellActionResolved"
+family = "combat_spells"
+internal_only = false
+projection_required = false
+projection_not_applicable_reason = "Spell resolution completes cast correlation; damage and buff events own public payloads."
+
+[[events]]
+name = "SpellCastRequest"
+family = "combat_spells"
+internal_only = true
+internal_only_reason = "The ordered session correlates the request with SpawnCast and emits SpellCastStarted."
+
+[[events]]
+name = "SpawnCast"
+family = "combat_spells"
+internal_only = true
+internal_only_reason = "The ordered session correlates the cast with SpellCastRequest and emits SpellCastStarted."
+
+[[events]]
+name = "SpellCastStarted"
+family = "combat_spells"
+internal_only = false
+
+[[events]]
+name = "SpellCastInterrupted"
+family = "combat_spells"
+internal_only = false
+projection_required = false
+projection_not_applicable_reason = "Cast interruption clears host cast state; seq.v1 exposes only cast starts."
+
+[[events]]
+name = "Targeted"
+family = "entities_spatial"
+internal_only = false
+
+[[events]]
+name = "Considered"
+family = "entities_spatial"
+internal_only = false
+
+[[events]]
+name = "AaTable"
+family = "items_progression"
+internal_only = true
+internal_only_reason = "The ordered session deduplicates definitions and emits AlternateAbilityDefined."
+
+[[events]]
+name = "AlternateAbilityDefined"
+family = "items_progression"
+internal_only = false
+projection_required = false
+projection_not_applicable_reason = "Alternate ability definitions enrich names used by later PlayerStats payloads."
+
+[[events]]
+name = "Exp"
+family = "items_progression"
+internal_only = true
+internal_only_reason = "The ordered session merges level state and emits ExperienceUpdated."
+
+[[events]]
+name = "ExperienceUpdated"
+family = "items_progression"
+internal_only = false
+
+[[events]]
+name = "AaExp"
+family = "items_progression"
+internal_only = true
+internal_only_reason = "The ordered session emits AlternateAdvancementUpdated."
+
+[[events]]
+name = "AlternateAdvancementUpdated"
+family = "items_progression"
+internal_only = false
+
+[[events]]
+name = "AlternateAdvancementSnapshot"
+family = "items_progression"
+internal_only = false
+
+[[events]]
+name = "Stamina"
+family = "player"
+internal_only = false
+
+[[events]]
+name = "ManaUpdate"
+family = "player"
+internal_only = true
+internal_only_reason = "The ordered session emits PlayerVitalsUpdated."
+
+[[events]]
+name = "SkillUpdate"
+family = "items_progression"
+internal_only = true
+internal_only_reason = "The ordered session suppresses duplicate values and emits SkillValueUpdated."
+
+[[events]]
+name = "SkillsSnapshot"
+family = "items_progression"
+internal_only = false
+
+[[events]]
+name = "SkillValueUpdated"
+family = "items_progression"
+internal_only = false
+
+[[events]]
+name = "LootTransaction"
+family = "loot"
+internal_only = true
+internal_only_reason = "The ordered session correlates confirmations and narration into LootAcquired."
+
+[[events]]
+name = "LootDrops"
+family = "loot"
+internal_only = true
+internal_only_reason = "The ordered session deduplicates corpse windows and emits CorpseLootSnapshot."
+
+[[events]]
+name = "CorpseLootSnapshot"
+family = "loot"
+internal_only = false
+
+[[events]]
+name = "LootAcquired"
+family = "loot"
+internal_only = false
+
+[[events]]
+name = "Money"
+family = "items_progression"
+internal_only = true
+internal_only_reason = "The ordered session normalizes denominations and emits MoneyBalanceUpdated."
+
+[[events]]
+name = "MoneyBalanceUpdated"
+family = "items_progression"
+internal_only = false
+
+[[events]]
+name = "SimpleMessage"
+family = "communication_social"
+internal_only = true
+internal_only_reason = "The ordered session emits ChatMessage with localized-message metadata."
+
+[[events]]
+name = "FormattedMessage"
+family = "communication_social"
+internal_only = true
+internal_only_reason = "The ordered session emits ChatMessage with localized arguments."
+
+[[events]]
+name = "SpecialMessage"
+family = "communication_social"
+internal_only = true
+internal_only_reason = "The ordered session emits ChatMessage after resolving target context."
+
+[[events]]
+name = "LootMessage"
+family = "communication_social"
+internal_only = true
+internal_only_reason = "The ordered session emits ChatMessage and feeds LootAcquired correlation."
+
+[[events]]
+name = "Chat"
+family = "communication_social"
+internal_only = true
+internal_only_reason = "The ordered session emits ChatMessage only for authoritative server traffic."
+
+[[events]]
+name = "ChatMessage"
+family = "communication_social"
+internal_only = false
+
+[[events]]
+name = "UcsRecord"
+family = "communication_social"
+internal_only = true
+internal_only_reason = "The ordered session repairs the channel name and emits ChatMessage."
+
+[[events]]
+name = "BuffList"
+family = "combat_spells"
+internal_only = true
+internal_only_reason = "The ordered session diffs the snapshot into BuffAdded, BuffUpdated, and BuffRemoved."
+
+[[events]]
+name = "BuffWire"
+family = "combat_spells"
+internal_only = true
+internal_only_reason = "The ordered session resolves owner and caster state into semantic buff events."
+
+[[events]]
+name = "BuffAdded"
+family = "combat_spells"
+internal_only = false
+
+[[events]]
+name = "BuffUpdated"
+family = "combat_spells"
+internal_only = false
+
+[[events]]
+name = "BuffRemoved"
+family = "combat_spells"
+internal_only = false
+
+[[events]]
+name = "GroupFollow"
+family = "communication_social"
+internal_only = true
+internal_only_reason = "The ordered session applies the membership delta and emits GroupRosterUpdated."
+
+[[events]]
+name = "GroupDisband"
+family = "communication_social"
+internal_only = true
+internal_only_reason = "The ordered session applies the departure or reset and emits GroupRosterUpdated."
+
+[[events]]
+name = "GroupRosterWire"
+family = "communication_social"
+internal_only = true
+internal_only_reason = "The ordered session assigns stable slots and emits GroupRosterUpdated."
+
+[[events]]
+name = "GroupRosterUpdated"
+family = "communication_social"
+internal_only = false
+
+[[events]]
+name = "DynamicZoneInfo"
+family = "communication_social"
+internal_only = true
+internal_only_reason = "The ordered session combines both dynamic-zone halves into DynamicZoneUpdated."
+
+[[events]]
+name = "DynamicZoneSwitch"
+family = "communication_social"
+internal_only = true
+internal_only_reason = "The ordered session combines both dynamic-zone halves into DynamicZoneUpdated."
+
+[[events]]
+name = "DynamicZoneUpdated"
+family = "communication_social"
+internal_only = false
+projection_required = false
+projection_not_applicable_reason = "Dynamic-zone updates maintain host state and have no standalone seq.v1 payload."
+
+[[events]]
+name = "LevelUpdate"
+family = "items_progression"
+internal_only = true
+internal_only_reason = "The ordered session merges level and experience state into final player and progression events."
+
+[[events]]
+name = "EnterWorld"
+family = "lifecycle"
+internal_only = false
+projection_required = false
+projection_not_applicable_reason = "Enter-world establishes session identity and has no standalone seq.v1 payload."

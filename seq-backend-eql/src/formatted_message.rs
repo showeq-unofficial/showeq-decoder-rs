@@ -71,9 +71,11 @@ fn split_args(blob: &[u8]) -> Vec<String> {
         if pos + len > blob.len() {
             break; // truncated / corrupt
         }
-        out.push(crate::links::clean_links(&String::from_utf8_lossy(
-            &blob[pos..pos + len],
-        )));
+        let text: String = blob[pos..pos + len]
+            .iter()
+            .map(|&byte| char::from(byte))
+            .collect();
+        out.push(crate::links::clean_links(&text));
         pos += len;
     }
     out

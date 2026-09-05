@@ -25,6 +25,7 @@ pub enum CursorError {
     },
 }
 
+#[derive(Clone, Copy)]
 pub struct Cursor<'a> {
     buf: &'a [u8],
     pos: usize,

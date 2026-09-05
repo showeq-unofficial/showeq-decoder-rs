@@ -39,6 +39,12 @@ pub enum NewZoneError {
     Truncated(usize, usize),
     #[error("{0} not NUL-terminated within payload")]
     UnterminatedText(&'static str),
+    #[error("{0} is not a plausible zone name")]
+    ImplausibleName(&'static str),
+}
+
+fn plausible(name: &str, max: usize) -> bool {
+    name.is_empty() || (name.len() <= max && name.bytes().all(|b| (0x20..=0x7e).contains(&b)))
 }
 
 struct R<'a> {
@@ -80,6 +86,12 @@ pub fn parse_new_zone(bytes: &[u8]) -> Result<NewZone, NewZoneError> {
     let mut r = R { bytes, p: 0 };
     let short_name = r.text("short_name")?;
     let long_name = r.text("long_name")?;
+    if !plausible(&short_name, 64) {
+        return Err(NewZoneError::ImplausibleName("short_name"));
+    }
+    if !plausible(&long_name, 128) {
+        return Err(NewZoneError::ImplausibleName("long_name"));
+    }
     r.skip(2)?;
     let zonefile = r.text("zonefile")?;
     r.skip(90)?;

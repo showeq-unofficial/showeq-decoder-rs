@@ -16,6 +16,7 @@
 //! daemon doesn't pre-validate the payload size.
 
 use crate::cursor::{Cursor, CursorError};
+use crate::eqstructs::sign_extend;
 use thiserror::Error;
 
 #[derive(Debug, Error, PartialEq, Eq)]
@@ -65,6 +66,45 @@ pub struct Spawn {
     pub state: u8,
     pub light: u8,
     pub is_mercenary: u8,
+}
+
+/// Semantic initial motion decoded from the Live spawn position block.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SpawnMotion {
+    pub x: i32,
+    pub y: i32,
+    pub z: i32,
+    pub delta_x: i32,
+    pub delta_y: i32,
+    pub delta_z: i32,
+    pub heading: u16,
+    pub delta_heading: i16,
+    pub animation: i16,
+}
+
+impl Spawn {
+    /// Decode the five-word position block after the variable-length spawn
+    /// body. Coordinates use 1/8 units and velocity uses 1/4 units, matching
+    /// the legacy daemon's `Spawn::update` conversions.
+    pub fn motion(&self) -> SpawnMotion {
+        let [w0, w1, w2, w3, w4] = self.pos_data;
+        SpawnMotion {
+            z: sign_extend(w0 & 0x7_ffff, 19) >> 3,
+            animation: sign_extend((w0 >> 19) & 0x3ff, 10) as i16,
+            y: sign_extend(w1 & 0x7_ffff, 19) >> 3,
+            heading: ((w1 >> 19) & 0xfff) as u16,
+            delta_y: sign_extend(w2 & 0x1fff, 13) >> 2,
+            x: sign_extend(w3 & 0x7_ffff, 19) >> 3,
+            delta_x: sign_extend((w3 >> 19) & 0x1fff, 13) >> 2,
+            delta_heading: sign_extend(w4 & 0x3ff, 10) as i16,
+            delta_z: sign_extend((w4 >> 10) & 0x1fff, 13) >> 2,
+        }
+    }
+
+    /// The model id is the first word of each five-word equipment record.
+    pub fn equipment_models(&self) -> [u32; 9] {
+        std::array::from_fn(|slot| self.equip_data[slot * 5])
+    }
 }
 
 impl Default for Spawn {
@@ -331,9 +371,40 @@ mod tests {
             &s.equip_data[35..45],
             &[70, 71, 72, 73, 74, 80, 81, 82, 83, 84]
         );
+        assert_eq!(s.equipment_models(), [0, 0, 0, 0, 0, 0, 0, 70, 80]);
         assert_eq!(s.pos_data, [1, 2, 3, 4, 5]);
         assert_eq!(s.is_mercenary, 1);
         assert_eq!(s.bytes_consumed as usize, buf.len());
+    }
+
+    #[test]
+    fn position_block_decodes_initial_motion_without_host_defaults() {
+        let signed = |value: i32, bits: u32| (value as u32) & ((1 << bits) - 1);
+        let spawn = Spawn {
+            pos_data: [
+                signed(-24, 19) | (signed(-7, 10) << 19),
+                signed(80, 19) | (3072 << 19),
+                signed(-20, 13),
+                signed(160, 19) | (signed(28, 13) << 19),
+                signed(-9, 10) | (signed(36, 13) << 10),
+            ],
+            ..Spawn::default()
+        };
+
+        assert_eq!(
+            spawn.motion(),
+            SpawnMotion {
+                x: 20,
+                y: 10,
+                z: -3,
+                delta_x: 7,
+                delta_y: -5,
+                delta_z: 9,
+                heading: 3072,
+                delta_heading: -9,
+                animation: -7,
+            }
+        );
     }
 
     #[test]

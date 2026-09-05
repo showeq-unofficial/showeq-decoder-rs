@@ -30,14 +30,22 @@ jobs:
           # seq-decode's parsers against the test struct mirror — the pairing
           # --workspace never compiles.
           - backend: test
-            test: cargo test -p seq-decode --no-default-features --features backend-test
+            test: >-
+              cargo test -p seq-decode --no-default-features --features backend-test &&
+              cargo test -p seq-session --no-default-features --features backend-test &&
+              cargo test -p seq-trace --no-default-features --features backend-test &&
+              cargo test -p seq-bridge --no-default-features --features backend-test
             clippy: >-
-              cargo clippy -p seq-decode -p seq-bridge
+              cargo clippy -p seq-decode -p seq-session -p seq-trace -p seq-bridge
               --no-default-features --features backend-test --all-targets
           - backend: eql
-            test: cargo test -p seq-backend-eql
+            test: >-
+              cargo test -p seq-backend-eql &&
+              cargo test -p seq-session --no-default-features --features backend-eql &&
+              cargo test -p seq-trace --no-default-features --features backend-eql &&
+              cargo test -p seq-bridge --no-default-features --features backend-eql
             clippy: >-
-              cargo clippy -p seq-bridge
+              cargo clippy -p seq-backend-eql -p seq-session -p seq-trace -p seq-bridge
               --no-default-features --features backend-eql --all-targets
     steps:
       - uses: actions/checkout@v5
@@ -73,6 +81,16 @@ jobs:
       - uses: actions/checkout@v5
       - run: cargo fmt --all -- --check
 
+  event-contract:
+    name: event and legacy-source coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: check generated manifest, bridge mapping, and source inventory
+        run: |
+          python3 tools/event_coverage.py check
+          python3 -B -m unittest discover -s tools -p 'test_event_coverage.py'
+
   eql-isolation:
     name: eql links no Live decoder
     runs-on: ubuntu-latest
@@ -83,12 +101,14 @@ jobs:
       # parser so a Live wire patch cannot reach eql. Nothing in the type system
       # enforces that — one `seq-decode` dependency re-couples them silently, and
       # the symptom would be an eql mis-decode months later. Guard the edge.
-      - name: seq-decode must not appear in the backend-eql dep tree
+      - name: seq-decode must not appear in an EQL consumer dep tree
         run: |
-          tree=$(cargo tree -p seq-bridge --no-default-features --features backend-eql)
-          if grep -q 'seq-decode' <<<"$tree"; then
-            echo "::error::backend-eql pulled in seq-decode — the eql/Live clean break is broken"
-            grep -n 'seq-decode' <<<"$tree"
-            exit 1
-          fi
+          for package in seq-bridge seq-trace seq-session; do
+            tree=$(cargo tree -p "$package" --no-default-features --features backend-eql)
+            if grep -q 'seq-decode' <<<"$tree"; then
+              echo "::error::$package backend-eql pulled in seq-decode — the eql/Live clean break is broken"
+              grep -n 'seq-decode' <<<"$tree"
+              exit 1
+            fi
+          done
           echo "ok: backend-eql has no seq-decode edge"

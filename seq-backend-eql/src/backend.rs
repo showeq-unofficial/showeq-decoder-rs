@@ -10,8 +10,9 @@
 //! output stays byte-for-byte identical across the migration.
 
 use seq_events::{
-    heading_deg, Backend, BuffEntry, Decoded, Dir, DoorInfo, Event, GuildRosterMember,
-    ItemTemplate, LootItemInfo, Pos, ProfileInfo, SpawnInfo, ZoneInfo,
+    heading_deg, Backend, BuffEntry, Decoded, Dir, DoorInfo, Event, GroundItemInfo,
+    GuildRosterMember, ItemTemplate, LootItemInfo, Point3, Pos, ProfileInfo, SpawnInfo, Velocity,
+    ZoneEnvironment, ZoneInfo, ZonePointInfo,
 };
 
 /// The EverQuest Legends backend (this crate's own parsers).
@@ -37,17 +38,26 @@ impl Backend for EqlBackend {
         }
 
         match opcode {
-            "OP_ZoneEntry" => spawn(bytes),
-            "OP_MobUpdate" => mob_update(bytes),
-            "OP_NpcMoveUpdate" => npc_move_update(bytes),
+            "OP_ZoneEntry" if dir == Dir::ServerToClient => spawn(bytes),
+            "OP_ZoneEntry" => Decoded::Ignored,
+            "OP_MobUpdate" if dir == Dir::ServerToClient => mob_update(bytes),
+            "OP_MobUpdate" => Decoded::Ignored,
+            "OP_NpcMoveUpdate" if dir == Dir::ServerToClient => npc_move_update(bytes),
+            "OP_NpcMoveUpdate" => Decoded::Ignored,
             "OP_RemoveSpawn" => remove_spawn(bytes),
             "OP_DeleteSpawn" => delete_spawn(bytes),
+            "OP_SpawnRename" if dir == Dir::ServerToClient => spawn_rename(bytes),
+            "OP_SpawnRename" => Decoded::Ignored,
             "OP_Death" => death(bytes),
             "OP_HPUpdate" => hp_update(bytes),
-            "OP_NewZone" => new_zone(bytes),
+            "OP_NewZone" if dir == Dir::ServerToClient => new_zone(bytes),
+            "OP_NewZone" => Decoded::Ignored,
             "OP_GuildsInZoneList" => guilds_in_zone_list(bytes),
             "OP_NewGuildInZone" => new_guild_in_zone(bytes),
-            "OP_PlayerProfile" => player_profile(bytes),
+            "OP_PlayerProfile" if dir == Dir::ServerToClient => player_profile(bytes),
+            "OP_PlayerProfile" => Decoded::Ignored,
+            "OP_ZoneChange" if dir == Dir::ClientToServer => zone_change(bytes),
+            "OP_ZoneChange" => Decoded::Ignored,
             "OP_LoadoutSwap" => loadout_swap(bytes),
             "OP_ClickObject" => click_object(dir, bytes),
             // eql's appearance event is the stock opcode carrying the WIDENED
@@ -56,20 +66,28 @@ impl Backend for EqlBackend {
             // the current patch; before this, 26530 packets a capture arrived
             // under a name with no arm and were dropped outright.
             "OP_SpawnAppearance" | "OP_SpawnAppearance2" => spawn_appearance2(bytes),
-            "OP_TimeOfDay" => time_of_day(bytes),
+            "OP_TimeOfDay" if dir == Dir::ServerToClient => time_of_day(bytes),
+            "OP_TimeOfDay" => Decoded::Ignored,
             "OP_Stance" => stance(bytes),
             "OP_Invocation" => invocation(bytes),
             "OP_GuildMemberList" => guild_roster(bytes),
             "OP_ItemPacket" => item_packet(bytes),
-            "OP_ZoneServerInfo" => zone_server_info(bytes),
+            "OP_ZoneServerInfo" if dir == Dir::ServerToClient => zone_server_info(bytes),
+            "OP_ZoneServerInfo" => Decoded::Ignored,
             "OP_GuildMOTD" => guild_motd(bytes),
             "OP_ExpandedGuildInfo" => expanded_guild_info(bytes),
             "OP_InspectAnswer" => inspect_answer(bytes),
             "OP_ClientUpdate" => self_pos(bytes),
             "OP_SelfPos" => self_pos_breadcrumb(bytes),
             "OP_Illusion" => illusion(bytes),
+            "OP_Action" => action(bytes),
             "OP_Action2" => action2(bytes),
-            "OP_BeginCast" => begin_cast(bytes),
+            "OP_BeginCast" if dir == Dir::ServerToClient => begin_cast(bytes),
+            "OP_BeginCast" => Decoded::Ignored,
+            "OP_CastSpell" if dir == Dir::ClientToServer => cast_spell(bytes),
+            "OP_CastSpell" => Decoded::Ignored,
+            "OP_Buff" if dir == Dir::ServerToClient => buff(bytes),
+            "OP_Buff" => Decoded::Ignored,
             "OP_TargetMouse" => target(bytes),
             "OP_Consider" => consider(bytes),
             "OP_CommonMessage" => chat(bytes, dir),
@@ -88,13 +106,26 @@ impl Backend for EqlBackend {
             "OP_MoneyUpdate" => money(bytes),
             "OP_SendAATable" => aa_table(bytes),
             "OP_BuffList" | "OP_BuffList2" | "OP_BuffList3" => buff_list(bytes),
-            "OP_GroundSpawn" => ground_item(bytes),
-            "OP_SpawnDoor" => doors(bytes),
+            "OP_GroundSpawn" if dir == Dir::ServerToClient => ground_item(bytes),
+            "OP_GroundSpawn" => Decoded::Ignored,
+            "OP_SpawnDoor" if dir == Dir::ServerToClient => doors(bytes),
+            "OP_SpawnDoor" => Decoded::Ignored,
+            "OP_CorpseLocResponse" if dir == Dir::ServerToClient => corpse_location(bytes),
+            "OP_CorpseLocResponse" => Decoded::Ignored,
+            "OP_SendZonePoints" if dir == Dir::ServerToClient => zone_points(bytes),
+            "OP_SendZonePoints" => Decoded::Ignored,
             "OP_GroupFollow" => group_follow(bytes),
             "OP_GroupDisband" | "OP_GroupDisband2" => group_disband(bytes),
+            "OP_GroupMemberList" if dir == Dir::ServerToClient => group_member_list(bytes),
+            "OP_GroupMemberList" => Decoded::Ignored,
             // OP_GroupUpdate is a fixed-168B status push (no roster); noop.
             "OP_GroupUpdate" => Decoded::Ignored,
-            "OP_EnterWorld" => Decoded::One(Event::EnterWorld),
+            "OP_DzInfo" if dir == Dir::ServerToClient => dynamic_zone_info(bytes),
+            "OP_DzInfo" => Decoded::Ignored,
+            "OP_DzSwitchInfo" if dir == Dir::ServerToClient => dynamic_zone_switch(bytes),
+            "OP_DzSwitchInfo" => Decoded::Ignored,
+            "OP_EnterWorld" if dir == Dir::ClientToServer => enter_world(bytes),
+            "OP_EnterWorld" => Decoded::Ignored,
             _ => Decoded::Unhandled,
         }
     }
@@ -131,6 +162,10 @@ fn spawn_event(s: &crate::ZoneSpawn) -> Event {
             z: i32::from(s.z),
             heading_deg: heading_deg(s.heading, 11),
         }),
+        velocity: Velocity::default(),
+        delta_heading: None,
+        animation: None,
+        equipment_models: None,
     })
 }
 
@@ -144,6 +179,9 @@ fn mob_update(bytes: &[u8]) -> Decoded {
                 z: s.z,
                 heading_deg: heading_deg(s.heading, 12),
             },
+            velocity: Velocity::default(),
+            delta_heading: None,
+            animation: None,
         }),
         Err(_) => Decoded::Malformed,
     }
@@ -159,6 +197,13 @@ fn npc_move_update(bytes: &[u8]) -> Decoded {
                 z: i32::from(s.z),
                 heading_deg: heading_deg(s.heading as u16, 12),
             },
+            velocity: Velocity {
+                x: s.has_delta_x.then_some(i32::from(s.delta_x)),
+                y: s.has_delta_y.then_some(i32::from(s.delta_y)),
+                z: s.has_delta_z.then_some(i32::from(s.delta_z)),
+            },
+            delta_heading: s.has_delta_heading.then_some(i16::from(s.delta_heading)),
+            animation: s.has_animation.then_some(s.animation),
         }),
         Err(_) => Decoded::Malformed,
     }
@@ -178,9 +223,26 @@ fn delete_spawn(bytes: &[u8]) -> Decoded {
     }
 }
 
-// OP_Death (newCorpseStruct): the deceased becomes a corpse, not a removal. The
-// caller owns the self-death case (it knows the player id) — see SpawnShell::
-// killSpawn / EqlDispatch::death.
+fn spawn_rename(bytes: &[u8]) -> Decoded {
+    match crate::spawn_rename::parse_spawn_rename(bytes) {
+        Ok(rename)
+            if !rename.old_name.is_empty()
+                && rename.old_name == rename.old_name_again
+                && !rename.new_name.is_empty() =>
+        {
+            Decoded::One(Event::SpawnRenamed {
+                id: None,
+                old_name: rename.old_name,
+                new_name: rename.new_name,
+            })
+        }
+        Ok(_) | Err(_) => Decoded::Malformed,
+    }
+}
+
+// OP_Death (newCorpseStruct): the deceased becomes a corpse, not a removal.
+// seq-session resolves player ownership; direct backend callers retain this
+// low-level result during migration.
 fn death(bytes: &[u8]) -> Decoded {
     match crate::death::parse_death(bytes) {
         Ok(d) => Decoded::One(Event::SpawnKilled {
@@ -193,8 +255,8 @@ fn death(bytes: &[u8]) -> Decoded {
 
 // eql OP_HPUpdate is the multiplexed stat-sync channel: spawn HP (real for the
 // self, percent for others) plus the player's mana/endurance, all in one packet.
-// Surface it whole as StatSync and let the consumer split self from other — it
-// knows the player id and this crate is stateless. Emitting one event per packet
+// Surface it whole as StatSync and let seq-session split self from other.
+// Emitting one event per packet
 // (rather than one per stat) is deliberate: it keeps a single wire packet from
 // fanning out into several near-identical player snapshots downstream.
 fn hp_update(bytes: &[u8]) -> Decoded {
@@ -253,6 +315,9 @@ fn self_pos(bytes: &[u8]) -> Decoded {
             // The phantom twin's id (see player_self_pos) — the host feeds it
             // to SelfTracker, which is the only thing allowed to act on it.
             spawn_id: u32::from(s.spawn_id),
+            velocity: Velocity::default(),
+            delta_heading: None,
+            animation: None,
         }),
         Err(_) => Decoded::Malformed,
     }
@@ -363,6 +428,66 @@ fn group_disband(bytes: &[u8]) -> Decoded {
         Ok(g) => Decoded::One(Event::GroupDisband {
             yourname: g.yourname,
             membername: g.membername,
+        }),
+        Err(_) => Decoded::Malformed,
+    }
+}
+
+fn group_member_list(bytes: &[u8]) -> Decoded {
+    match crate::group_member_list::parse_group_member_list(bytes) {
+        Ok(roster) if roster.member_count == 0 || roster.member_count > 6 => Decoded::Ignored,
+        Ok(roster) => {
+            let unique: std::collections::BTreeSet<_> = roster
+                .names
+                .iter()
+                .map(String::as_str)
+                .filter(|name| !name.is_empty())
+                .collect();
+            let complete = unique.len() >= roster.member_count as usize;
+            Decoded::One(Event::GroupRosterWire {
+                group_id: roster.group_id,
+                member_count: roster.member_count,
+                names: roster.names,
+                complete,
+            })
+        }
+        Err(_) => Decoded::Malformed,
+    }
+}
+
+fn dynamic_zone_info(bytes: &[u8]) -> Decoded {
+    match crate::dz_info::parse_dz_info(bytes) {
+        Ok(info) => Decoded::One(Event::DynamicZoneInfo {
+            active: info.new_dz != 0,
+            max_players: info.max_players,
+            expedition_name: info.dz_name,
+            leader_name: info.name,
+        }),
+        Err(_) => Decoded::Malformed,
+    }
+}
+
+fn dynamic_zone_switch(bytes: &[u8]) -> Decoded {
+    if bytes.len() == 8 {
+        return Decoded::One(Event::DynamicZoneSwitch {
+            active: false,
+            zone_id: None,
+            instance_id: None,
+            kind: None,
+            position: None,
+        });
+    }
+    match crate::dz_switch_info::parse_dz_switch_info(bytes) {
+        Ok(switch) => Decoded::One(Event::DynamicZoneSwitch {
+            active: true,
+            zone_id: Some(switch.zone_id),
+            instance_id: Some(switch.instance_id),
+            kind: Some(switch.kind),
+            position: Some(Point3 {
+                x: switch.x,
+                y: switch.y,
+                z: switch.z,
+            }),
         }),
         Err(_) => Decoded::Malformed,
     }
@@ -562,6 +687,67 @@ fn action2(bytes: &[u8]) -> Decoded {
     }
 }
 
+fn action(bytes: &[u8]) -> Decoded {
+    let parsed = if bytes.len() == crate::action::PAYLOAD_LEN {
+        crate::action::parse_action(bytes).ok().map(|action| {
+            (
+                action.source,
+                action.target,
+                action.spell,
+                action.level,
+                action.kind,
+            )
+        })
+    } else {
+        crate::action_alt::parse_action_alt(bytes)
+            .ok()
+            .map(|action| {
+                (
+                    action.source,
+                    action.target,
+                    action.spell,
+                    action.level,
+                    action.kind,
+                )
+            })
+    };
+    match parsed {
+        Some((source, target, spell_id, caster_level, kind)) => Decoded::One(Event::SpellAction {
+            source: u32::from(source),
+            target: u32::from(target),
+            spell_id: u32::from(spell_id),
+            caster_level,
+            kind,
+        }),
+        None => Decoded::Malformed,
+    }
+}
+
+fn cast_spell(bytes: &[u8]) -> Decoded {
+    match crate::start_cast::parse_start_cast(bytes) {
+        Ok(cast) => Decoded::One(Event::SpellCastRequest {
+            slot: cast.slot,
+            spell_id: cast.spell_id,
+            target_id: cast.target_id,
+        }),
+        Err(_) => Decoded::Malformed,
+    }
+}
+
+fn buff(bytes: &[u8]) -> Decoded {
+    match crate::buff::parse_buff(bytes) {
+        Ok(buff) => Decoded::One(Event::BuffWire {
+            spawn_id: buff.spawn_id,
+            spell_id: buff.spell_id,
+            form: buff.form,
+            slot: buff.slot,
+            duration_ticks: buff.dur_ticks,
+            change_type: buff.change_type,
+        }),
+        Err(_) => Decoded::Malformed,
+    }
+}
+
 // OP_BeginCast: a spawn started casting. The daemon surfaces this (a transient
 // cast indicator), NOT OP_CastSpell — cast-start buff insertion was noise, buffs
 // ride OP_BuffList.
@@ -578,12 +764,51 @@ fn begin_cast(bytes: &[u8]) -> Decoded {
 
 fn new_zone(bytes: &[u8]) -> Decoded {
     match crate::parse_new_zone(bytes) {
-        Ok(z) => Decoded::One(Event::ZoneChanged(ZoneInfo {
-            short_name: z.short_name,
-            long_name: z.long_name,
-        })),
+        Ok(z) => Decoded::Many(vec![
+            Event::ZoneChanged(ZoneInfo {
+                short_name: z.short_name,
+                long_name: z.long_name,
+            }),
+            Event::ZoneEnvironmentChanged(ZoneEnvironment {
+                zone_file: z.zonefile,
+                experience_multiplier: z.zone_exp_multiplier,
+                safe_x: z.safe_x,
+                safe_y: z.safe_y,
+                safe_z: z.safe_z,
+            }),
+        ]),
         Err(_) => Decoded::Malformed,
     }
+}
+
+fn zone_change(bytes: &[u8]) -> Decoded {
+    // Legends carries position but no destination in this 484-byte request.
+    if bytes.len() != 484 {
+        return Decoded::Malformed;
+    }
+    Decoded::One(Event::ZoneTransition {
+        character_name: String::new(),
+        zone_id: None,
+        instance_id: None,
+        confirmed: false,
+    })
+}
+
+fn enter_world(bytes: &[u8]) -> Decoded {
+    if bytes.len() != 72 {
+        return Decoded::Malformed;
+    }
+    let end = bytes
+        .iter()
+        .position(|byte| *byte == 0)
+        .unwrap_or(bytes.len());
+    let name = &bytes[..end];
+    if name.is_empty() || name.len() > 63 || !name.iter().all(|byte| byte.is_ascii_graphic()) {
+        return Decoded::Malformed;
+    }
+    Decoded::One(Event::EnterWorld {
+        character_name: String::from_utf8_lossy(name).into_owned(),
+    })
 }
 
 fn player_profile(bytes: &[u8]) -> Decoded {
@@ -600,6 +825,9 @@ fn player_profile(bytes: &[u8]) -> Decoded {
             aa_ids: p.aa_ids,
             aa_values: p.aa_values,
             aa_spent: p.aa_spent,
+            aa_assigned: p.aa_assigned,
+            aa_unspent: p.aa_unspent,
+            aa_experience: p.exp_aa,
             skills: p.skills,
             class_mask: p.class_mask,
             str_: p.str_,
@@ -619,16 +847,38 @@ fn player_profile(bytes: &[u8]) -> Decoded {
 }
 
 fn doors(bytes: &[u8]) -> Decoded {
-    let doors: Vec<DoorInfo> = bytes
-        .chunks(crate::spawn_door::PAYLOAD_LEN)
-        .filter(|c| c.len() == crate::spawn_door::PAYLOAD_LEN)
-        .filter_map(|c| crate::spawn_door::parse_door(c).ok())
+    if bytes.len() % crate::spawn_door::PAYLOAD_LEN != 0 {
+        return Decoded::Malformed;
+    }
+    let parsed = bytes
+        .chunks_exact(crate::spawn_door::PAYLOAD_LEN)
+        .map(crate::spawn_door::parse_door)
+        .collect::<Result<Vec<_>, _>>()
+        .expect("validated fixed-size door rows");
+    if parsed.iter().any(|door| {
+        ![door.x, door.y, door.z, door.heading]
+            .into_iter()
+            .all(f32::is_finite)
+    }) {
+        return Decoded::Malformed;
+    }
+    let doors: Vec<DoorInfo> = parsed
+        .into_iter()
         .map(|d| DoorInfo {
             id: u32::from(d.door_id),
             name: d.name,
-            x: d.x.round() as i32,
-            y: d.y.round() as i32,
-            z: d.z.round() as i32,
+            position: Point3 {
+                x: d.x,
+                y: d.y,
+                z: d.z,
+            },
+            heading: d.heading,
+            incline: d.incline,
+            size: d.size,
+            open_type: d.opentype,
+            state: d.spawnstate,
+            invert_state: d.invertstate,
+            zone_point_id: (d.zone_point != u32::MAX).then_some(d.zone_point),
         })
         .collect();
     Decoded::One(Event::Doors(doors))
@@ -733,7 +983,11 @@ fn item_set_event(set: crate::item_packet::ItemSet) -> Event {
                 name: i.name,
                 lore_name: i.lore_name,
                 item_id: i.item_id,
-                icon: i.icon,
+                icon: Some(i.icon),
+                stack_count: None,
+                weight_tenths: None,
+                flags: None,
+                corruption: None,
                 slot_mask: i.slot_mask,
                 container_id: i.container_id,
                 container_slot: i.container_slot,
@@ -766,7 +1020,7 @@ fn guild_roster(bytes: &[u8]) -> Decoded {
     // decode_guild_roster in seq-bridge.
     match crate::guild_roster::parse_guild_member_list(bytes) {
         Ok(r) => {
-            let members = r
+            let members: Vec<GuildRosterMember> = r
                 .members
                 .into_iter()
                 .map(|m| GuildRosterMember {
@@ -784,10 +1038,17 @@ fn guild_roster(bytes: &[u8]) -> Decoded {
                     zone_id: m.zone_id as u32,
                 })
                 .collect();
-            Decoded::One(Event::GuildRoster {
-                guild_id: r.guild_id,
-                members,
-            })
+            Decoded::Many(vec![
+                Event::GuildRoster {
+                    guild_id: r.guild_id,
+                    members: members.clone(),
+                },
+                Event::GuildRosterWire {
+                    guild_id: r.guild_id,
+                    members,
+                    complete: true,
+                },
+            ])
         }
         Err(_) => Decoded::Malformed,
     }
@@ -823,7 +1084,14 @@ fn invocation(bytes: &[u8]) -> Decoded {
 fn time_of_day(bytes: &[u8]) -> Decoded {
     // 8B timeOfDayStruct: hour@0 u8, minute@1 u8, day@2 u8, month@3 u8,
     // year@4 u16 (+ 2B pad). Read the 6 meaningful bytes; tolerate the pad.
-    if bytes.len() < 6 {
+    if bytes.len() != 8 {
+        return Decoded::Malformed;
+    }
+    if !(1..=24).contains(&bytes[0])
+        || bytes[1] > 59
+        || !(1..=28).contains(&bytes[2])
+        || !(1..=12).contains(&bytes[3])
+    {
         return Decoded::Malformed;
     }
     Decoded::One(Event::TimeOfDay {
@@ -921,19 +1189,87 @@ fn illusion(bytes: &[u8]) -> Decoded {
     }
 }
 
-// OP_GroundSpawn: one ground object per packet (variable-length actorDef name).
-// Coords truncate toward zero to match the daemon's float→int position cast.
 fn ground_item(bytes: &[u8]) -> Decoded {
     match crate::ground_spawn::parse_ground_spawn(bytes) {
-        Ok(g) => Decoded::One(Event::GroundItem {
-            drop_id: g.drop_id,
-            id_file: g.id_file,
-            x: g.x as i32,
-            y: g.y as i32,
-            z: g.z as i32,
-        }),
-        Err(_) => Decoded::Malformed,
+        Ok(g) if [g.x, g.y, g.z, g.heading].into_iter().all(f32::is_finite) => {
+            Decoded::One(Event::GroundItem(GroundItemInfo {
+                id: g.drop_id,
+                actor_definition: g.id_file,
+                position: Point3 {
+                    x: g.x,
+                    y: g.y,
+                    z: g.z,
+                },
+                heading: None,
+            }))
+        }
+        Ok(_) | Err(_) => Decoded::Malformed,
     }
+}
+
+fn corpse_location(bytes: &[u8]) -> Decoded {
+    match crate::corpse_loc::parse_corpse_loc(bytes) {
+        Ok(corpse)
+            if [corpse.x, corpse.y, corpse.z]
+                .into_iter()
+                .all(f32::is_finite) =>
+        {
+            Decoded::One(Event::CorpseLocated {
+                id: corpse.spawn_id,
+                position: Point3 {
+                    x: corpse.x,
+                    y: corpse.y,
+                    z: corpse.z,
+                },
+            })
+        }
+        Ok(_) | Err(_) => Decoded::Malformed,
+    }
+}
+
+fn zone_points(bytes: &[u8]) -> Decoded {
+    let Some(count_bytes) = bytes.get(..4) else {
+        return Decoded::Malformed;
+    };
+    let count = u32::from_le_bytes(count_bytes.try_into().expect("four-byte slice")) as usize;
+    let Some(rows_len) = count.checked_mul(crate::zone_point::PAYLOAD_LEN) else {
+        return Decoded::Malformed;
+    };
+    let Some(expected_len) = 4usize.checked_add(rows_len).and_then(|n| n.checked_add(24)) else {
+        return Decoded::Malformed;
+    };
+    if bytes.len() != expected_len {
+        return Decoded::Malformed;
+    }
+    let rows = &bytes[4..4 + rows_len];
+    let parsed = rows
+        .chunks_exact(crate::zone_point::PAYLOAD_LEN)
+        .map(crate::zone_point::parse_zone_point)
+        .collect::<Result<Vec<_>, _>>()
+        .expect("validated fixed-size zone-point rows");
+    if parsed.iter().any(|point| {
+        ![point.x, point.y, point.z, point.heading]
+            .into_iter()
+            .all(f32::is_finite)
+    }) {
+        return Decoded::Malformed;
+    }
+    let points = parsed
+        .into_iter()
+        .map(|point| ZonePointInfo {
+            trigger_id: Some(point.zone_trigger),
+            actor_definition: None,
+            position: Point3 {
+                x: point.x,
+                y: point.y,
+                z: point.z,
+            },
+            heading: point.heading,
+            destination_zone_id: Some(point.zone_id),
+            destination_instance_id: Some(point.zone_instance),
+        })
+        .collect();
+    Decoded::One(Event::ZonePoints(points))
 }
 
 #[cfg(test)]
@@ -944,6 +1280,24 @@ mod tests {
     fn unknown_opcode_is_unhandled() {
         let d = EqlBackend.decode("OP_DoesNotExist", Dir::ServerToClient, &[]);
         assert_eq!(d, Decoded::Unhandled);
+    }
+
+    #[test]
+    fn entity_broadcasts_validate_direction_before_payload() {
+        let backend = EqlBackend;
+        for opcode in [
+            "OP_ZoneEntry",
+            "OP_MobUpdate",
+            "OP_NpcMoveUpdate",
+            "OP_SpawnDoor",
+            "OP_SendZonePoints",
+        ] {
+            assert_eq!(
+                backend.decode(opcode, Dir::ClientToServer, &[]),
+                Decoded::Ignored,
+                "{opcode}"
+            );
+        }
     }
 
     // The parser returns the raw field; the sense is applied here.
@@ -969,9 +1323,23 @@ mod tests {
     }
 
     #[test]
-    fn enter_world_has_no_payload() {
-        let d = EqlBackend.decode("OP_EnterWorld", Dir::ServerToClient, &[]);
-        assert_eq!(d, Decoded::One(Event::EnterWorld));
+    fn enter_world_validates_direction_and_identity() {
+        let mut payload = [0; 72];
+        payload[..8].copy_from_slice(b"Testchar");
+        assert_eq!(
+            EqlBackend.decode("OP_EnterWorld", Dir::ClientToServer, &payload),
+            Decoded::One(Event::EnterWorld {
+                character_name: "Testchar".into()
+            })
+        );
+        assert_eq!(
+            EqlBackend.decode("OP_EnterWorld", Dir::ServerToClient, &payload),
+            Decoded::Ignored
+        );
+        assert_eq!(
+            EqlBackend.decode("OP_EnterWorld", Dir::ClientToServer, &[]),
+            Decoded::Malformed
+        );
     }
 
     #[test]

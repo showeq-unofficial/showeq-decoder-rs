@@ -36,10 +36,14 @@ pub struct ZoneServerInfo {
 pub enum ZoneServerInfoError {
     #[error("expected {PAYLOAD_LEN} bytes, got {0}")]
     BadLen(usize),
+    #[error("zone server host is empty or contains non-printable bytes")]
+    InvalidHost,
+    #[error("zone server port is zero")]
+    InvalidPort,
 }
 
 pub fn parse_zone_server_info(b: &[u8]) -> Result<ZoneServerInfo, ZoneServerInfoError> {
-    if b.len() < PAYLOAD_LEN {
+    if b.len() != PAYLOAD_LEN {
         return Err(ZoneServerInfoError::BadLen(b.len()));
     }
 
@@ -50,9 +54,17 @@ pub fn parse_zone_server_info(b: &[u8]) -> Result<ZoneServerInfo, ZoneServerInfo
         .position(|&c| c == 0)
         .unwrap_or(PORT_OFFSET);
 
+    let host = &host_bytes[..end];
+    if host.is_empty() || !host.iter().all(|byte| (0x20..=0x7e).contains(byte)) {
+        return Err(ZoneServerInfoError::InvalidHost);
+    }
+    let port = u16::from_le_bytes([b[PORT_OFFSET], b[PORT_OFFSET + 1]]);
+    if port == 0 {
+        return Err(ZoneServerInfoError::InvalidPort);
+    }
     Ok(ZoneServerInfo {
-        host: String::from_utf8_lossy(&host_bytes[..end]).into_owned(),
-        port: u16::from_le_bytes([b[PORT_OFFSET], b[PORT_OFFSET + 1]]),
+        host: String::from_utf8_lossy(host).into_owned(),
+        port,
     })
 }
 

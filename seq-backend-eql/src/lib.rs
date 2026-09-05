@@ -8,9 +8,10 @@
 //! layouts. `seq-bridge`'s `backend-eql` feature routes every `decode_*` here —
 //! there is no eql → seq-decode edge.
 //!
-//! Cite opcodes by NAME, never by id — EQL rotates ids nearly every patch, and
-//! `scry-cpp/conf/eql/opcodes.toml` is the only map. Retired ids may be
-//! named AS history.
+//! Cite opcodes by NAME, never by id — EQL rotates ids nearly every patch. The
+//! map is `seq-protocol-data/data/eql.toml`; `seq-protocol-data/tools/
+//! import_host_catalogs.py --check` keeps scry-cpp's `conf/eql/opcodes.toml`
+//! in step with it. Retired ids may be named AS history.
 //!
 //! Two kinds of module live here:
 //!   * eql's OWN byte-offset parsers for the opcodes whose Legends wire diverges
@@ -59,7 +60,6 @@ pub mod ground_spawn;
 pub mod group_disband;
 pub mod group_follow;
 pub mod group_member_list;
-pub mod group_roster;
 pub mod guild_expanded_info;
 pub mod guild_in_zone;
 pub mod guild_motd;
@@ -125,7 +125,6 @@ pub use formatted_message::{parse_formatted_message, FormattedMessage, Formatted
 pub use ground_spawn::{parse_ground_spawn, GroundSpawn, GroundSpawnError};
 pub use group_disband::{parse_group_disband, GroupDisband, GroupDisbandError};
 pub use group_follow::{parse_group_follow, GroupFollow, GroupFollowError};
-pub use group_roster::{parse_group_roster, GroupRoster, GroupRosterError};
 pub use loot_drops::{parse_loot_drops, LootDrops, LootDropsError};
 pub use loot_message::{parse_loot_message, LootMessage, LootMessageError};
 pub use loot_track::{LootRow, LootSource, LootTracker};
@@ -633,7 +632,7 @@ fn walk_profile_skills(b: &[u8], prof: &mut PlayerProfile) {
 
 /// `OP_NewZone` (Legends) S>C, ~340B, once per zone-in. Carries the
 /// CURRENT zone as packed NUL-terminated text — `short_name` then `long_name`
-/// (then a zonefile repeat + binary tail we ignore). The daemon drives
+/// (then a zonefile repeat + environment tail). The daemon drives
 /// `ZoneMgr::setZoneByName(short, long)` directly, so no classic-id table is
 /// needed. Confirmed 3-way (2026-07-08): guktop / "The City of Guk",
 /// nektulos / "Nektulos Forest", unrest / "The Estate of Unrest" — each the
@@ -644,32 +643,13 @@ fn walk_profile_skills(b: &[u8], prof: &mut PlayerProfile) {
 /// BIND zone (identical across zones); that opcode is not OP_NewZone and is no
 /// longer decoded here.
 pub fn parse_new_zone(b: &[u8]) -> Result<NewZone, DecodeError> {
-    // short_name @0, long_name after its NUL; the binary tail is unused. `latin1`
-    // maps ANY byte to a char, so the names are gated before World latches them.
-    let n0 = b
-        .iter()
-        .position(|&c| c == 0)
-        .ok_or(DecodeError::Short(b.len()))?;
-    if n0 == 0 {
-        return Err(DecodeError::Short(b.len()));
-    }
-    let rest = &b[n0 + 1..];
-    let n1 = rest
-        .iter()
-        .position(|&c| c == 0)
-        .ok_or(DecodeError::Short(b.len()))?;
-    let short_name = latin1(&b[..n0]);
-    let long_name = latin1(&rest[..n1]);
-    if !new_zone::plausible(&short_name, 64) {
-        return Err(DecodeError::Implausible("short_name"));
-    }
-    if !new_zone::plausible(&long_name, 128) {
-        return Err(DecodeError::Implausible("long_name"));
-    }
-    Ok(NewZone {
-        short_name,
-        long_name,
-        ..Default::default()
+    // Keep this public compatibility entry point, but make the module parser
+    // the sole implementation used by both the Event backend and direct FFI.
+    // Preserve the compatibility error for implausible names so callers can
+    // distinguish the August 25 opcode-rotation failure from truncation.
+    new_zone::parse_new_zone(b).map_err(|error| match error {
+        NewZoneError::ImplausibleName(field) => DecodeError::Implausible(field),
+        _ => DecodeError::Short(b.len()),
     })
 }
 
@@ -1584,14 +1564,23 @@ mod tests {
 
     #[test]
     fn new_zone_reads_packed_names() {
-        // OP_NewZone layout: short\0 long\0 <binary tail we ignore>.
+        // OP_NewZone layout: short, long, zone file, then environment.
         let mut b = Vec::new();
         b.extend_from_slice(b"guktop\0");
         b.extend_from_slice(b"The City of Guk\0");
-        b.extend_from_slice(&[0u8; 40]);
+        b.extend_from_slice(&[0u8; 3]);
+        b.extend_from_slice(b"guktop.eqg\0");
+        let mut tail = [0u8; 306];
+        tail[5..9].copy_from_slice(&1u32.to_le_bytes());
+        tail[9..13].copy_from_slice(&1.0f32.to_le_bytes());
+        tail[123..127].copy_from_slice(&2.0f32.to_le_bytes());
+        tail[127..131].copy_from_slice(&1.0f32.to_le_bytes());
+        tail[131..135].copy_from_slice(&3.0f32.to_le_bytes());
+        b.extend_from_slice(&tail);
         let z = parse_new_zone(&b).unwrap();
         assert_eq!(z.short_name, "guktop");
         assert_eq!(z.long_name, "The City of Guk");
+        assert_eq!(z.zonefile, "guktop.eqg");
     }
 
     #[test]
@@ -1617,7 +1606,15 @@ mod tests {
         let mut b = Vec::new();
         b.extend_from_slice(b"hateplane_eqlsolo\0");
         b.extend_from_slice(b"The Plane of Hate\0");
-        b.extend_from_slice(&[0u8; 40]);
+        b.extend_from_slice(&[0u8; 3]);
+        b.extend_from_slice(b"hateplane.eqg\0");
+        let mut tail = [0u8; 306];
+        tail[5..9].copy_from_slice(&1u32.to_le_bytes());
+        tail[9..13].copy_from_slice(&1.0f32.to_le_bytes());
+        tail[123..127].copy_from_slice(&0.0f32.to_le_bytes());
+        tail[127..131].copy_from_slice(&0.0f32.to_le_bytes());
+        tail[131..135].copy_from_slice(&0.0f32.to_le_bytes());
+        b.extend_from_slice(&tail);
         let z = parse_new_zone(&b).unwrap();
         assert_eq!(z.short_name, "hateplane_eqlsolo");
         assert_eq!(z.long_name, "The Plane of Hate");

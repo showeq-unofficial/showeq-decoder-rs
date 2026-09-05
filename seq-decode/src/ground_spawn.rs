@@ -5,9 +5,9 @@
 //! heading f32, three skipped u32s, then y/x/z f32 triplet.
 //!
 //! Total fixed size: 44 bytes around the variable text. The text
-//! field corresponds to the legacy `makeDropStruct.idFile[30]`
-//! actor-id string; longer strings are truncated to 30 bytes on
-//! the way out so the C++ side can `strcpy` into its fixed buffer.
+//! field corresponds to the legacy `makeDropStruct.idFile[30]` actor-id string.
+//! The parser keeps the full wire value; a legacy host projector owns any
+//! truncation needed for its fixed buffer.
 
 use thiserror::Error;
 
@@ -17,8 +17,7 @@ const FIXED_AROUND_TEXT: usize = 4 + 4 * 3 + 4 + 4 * 3 + 4 * 3; // 44
 #[derive(Debug, Clone)]
 pub struct GroundSpawn {
     pub drop_id: u32,
-    /// NUL-terminated idFile text from the payload, truncated to
-    /// `ID_FILE_LEN` bytes to match the legacy fixed field.
+    /// Full NUL-terminated idFile text from the payload.
     pub id_file: String,
     pub heading: f32,
     pub y: f32,
@@ -66,8 +65,7 @@ pub fn parse_ground_spawn(bytes: &[u8]) -> Result<GroundSpawn, GroundSpawnError>
     let text_len = p - text_start;
     let text_end = p + 1; // skip the NUL
 
-    let copy_len = text_len.min(ID_FILE_LEN);
-    let id_file = String::from_utf8_lossy(&bytes[text_start..text_start + copy_len]).into_owned();
+    let id_file = String::from_utf8_lossy(&bytes[text_start..text_start + text_len]).into_owned();
 
     // After the text, the netstream layout is:
     //   3× u32 skip (zoneId, zoneInstance, unknown)
@@ -144,7 +142,7 @@ mod tests {
     }
 
     #[test]
-    fn truncates_long_id_file() {
+    fn preserves_long_id_file_for_host_projection() {
         let mut buf = Vec::new();
         buf.extend_from_slice(&1u32.to_le_bytes());
         // 35-char text — longer than ID_FILE_LEN(30).
@@ -154,6 +152,6 @@ mod tests {
         buf.push(0);
         buf.extend_from_slice(&[0u8; FIXED_AROUND_TEXT - 4]);
         let g = parse_ground_spawn(&buf).unwrap();
-        assert_eq!(g.id_file.as_bytes(), &long_name[..ID_FILE_LEN]);
+        assert_eq!(g.id_file.as_bytes(), long_name);
     }
 }

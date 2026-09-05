@@ -55,7 +55,12 @@ pub fn parse_formatted_message_args(bytes: &[u8]) -> Vec<String> {
         if len == 0 || off + len > bytes.len() {
             break;
         }
-        args.push(String::from_utf8_lossy(&bytes[off..off + len]).into_owned());
+        args.push(
+            bytes[off..off + len]
+                .iter()
+                .map(|&byte| char::from(byte))
+                .collect(),
+        );
         off += len;
     }
     args

@@ -158,20 +158,8 @@ impl SelfTracker {
         self.provisional_id
     }
 
-    /// Observe the spawn id carried by the local player's own outbound position
-    /// report (`OP_ClientUpdate`, C>S, `spawnId` at offset 2).
-    ///
-    /// Direction is the proof of ownership: the server never broadcasts your
-    /// own position back to you, and over a 161-report capture this field took
-    /// exactly three values, switching at precisely the two zone transitions,
-    /// with none ever appearing in the S>C stream (see `player_self_pos`).
-    ///
-    /// The id is the PHANTOM TWIN's, not the live copy's, which is why it must
-    /// never outrank `observe_spawn`'s name match: pinning the player to it
-    /// while the live copy exists attaches them to the record the client hides
-    /// and leaves the moving one loose in the spawn list. With no zone-in
-    /// witnessed neither record exists, so the twin id is the only one there
-    /// is — and it is the id eql keys the player's stats to anyway.
+    /// Observe the self id from the C>S position report; it is the phantom
+    /// twin's id, so `observe_spawn`'s name match always outranks it.
     pub fn observe_self_pos(&mut self, spawn_id: u32) -> SelfPosRouting {
         if spawn_id == 0 {
             return SelfPosRouting::Known;
@@ -271,41 +259,8 @@ impl SelfTracker {
             return SelfStat::from_stat_sync(s, true);
         }
 
-        // Mid-session second signal, for a host that attached with no zone-in
-        // to name-match against. A wide packet carrying mana or endurance is
-        // treated as ours, and unlike the position report it keeps arriving
-        // while the player stands still. Attribution only: this packet has no
-        // coordinates, so it lands in `alt_id` and never touches
-        // `provisional_id`. Both slots matter — sharing one made the two
-        // signals overwrite each other, re-adopting on every packet.
-        //
-        // This is a GUESS, and it is bounded two ways. The premise — that
-        // mana/endurance ride this channel for the local player only — does not
-        // survive a zone full of other players, who report both.
-        //
-        //  1. It latches AT MOST ONCE per session (`alt_id == 0`). Re-deciding
-        //     per packet let every neighbouring PC claim to be us in turn, each
-        //     overwriting the last one's maxima. Measured on a 3-zone capture:
-        //     12 distinct ids claimed the player's stats where the correct
-        //     answer was 3, giving 16 conflicting sets of maxima.
-        //  2. Once the position report has named an id, the stats id must be
-        //     that id's TWIN — issued in the same batch, so within
-        //     `SAME_BATCH`. The two mid-session signals legitimately carry
-        //     different ids (pos = one record, stats = its twin), so they
-        //     corroborate rather than duplicate; an id far from the one we are
-        //     already tracking is some other spawn.
-        //
-        // A later name match supersedes the guess outright: `observe_spawn`
-        // clears `alt_id` when it adopts.
-        //
-        // Hosts that isolate one session per tracker (the daemon's per-box
-        // wiring) resolve `self_id` from the zone-in burst long before this can
-        // fire; hosts that funnel several sessions through one tracker reopen
-        // the window on every reset, which is what exposed the old behaviour.
-        // Once the position report has named an id, this one must be its twin
-        // — that is a real qualification, so it may latch freely. With nothing
-        // to qualify against (a true cold attach) it is an unqualified guess
-        // and gets exactly one shot per session.
+        // Cold-attach guess from a wide mana/endurance packet: latches once per
+        // session, or freely when it is the twin of the position-report id.
         let qualifies = if self.provisional_id != 0 {
             s.spawn_id.abs_diff(self.provisional_id) <= SAME_BATCH
         } else {

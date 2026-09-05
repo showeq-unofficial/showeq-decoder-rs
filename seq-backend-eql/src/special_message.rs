@@ -51,7 +51,10 @@ pub fn parse_special_message(bytes: &[u8]) -> Result<SpecialMessage, SpecialMess
     let source_start = HEADER_LEN;
     let source_end = source_start
         + find_nul(&bytes[source_start..]).ok_or(SpecialMessageError::SourceUnterminated)?;
-    let source = String::from_utf8_lossy(&bytes[source_start..source_end]).into_owned();
+    let source = bytes[source_start..source_end]
+        .iter()
+        .map(|&byte| char::from(byte))
+        .collect();
 
     let message_start = source_end + 1 + MID_PADDING;
     if bytes.len() < message_start {
@@ -62,7 +65,10 @@ pub fn parse_special_message(bytes: &[u8]) -> Result<SpecialMessage, SpecialMess
     }
     let message_end = message_start
         + find_nul(&bytes[message_start..]).ok_or(SpecialMessageError::MessageUnterminated)?;
-    let message = String::from_utf8_lossy(&bytes[message_start..message_end]).into_owned();
+    let message = bytes[message_start..message_end]
+        .iter()
+        .map(|&byte| char::from(byte))
+        .collect();
 
     Ok(SpecialMessage {
         message_color,

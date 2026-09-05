@@ -63,7 +63,10 @@ impl<'a> R<'a> {
             .iter()
             .position(|&b| b == 0)
             .ok_or(ChannelMessageError::UnterminatedText(which))?;
-        let s = String::from_utf8_lossy(&self.bytes[self.p..self.p + end]).into_owned();
+        let s = self.bytes[self.p..self.p + end]
+            .iter()
+            .map(|&byte| char::from(byte))
+            .collect();
         self.p += end + 1;
         Ok(s)
     }

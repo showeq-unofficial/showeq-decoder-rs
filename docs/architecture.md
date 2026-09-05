@@ -27,11 +27,13 @@ and each gets its own FFI surface — they don't share one:
 - **`seq-bridge`** is a `cxx` staticlib consumed by `scry-cpp`. Its
   `backend-live`/`backend-test` Cargo features link `seq-decode` (which
   `#[cfg]`-selects `seq-structs-live` or `seq-structs-test` as its binding
-  crate); `backend-eql` links **only** `seq-backend-eql`, calling its
-  `parse_*` functions directly — no `seq-events`, no `Backend` trait, no
-  `seq-decode` edge. The `decode_*` FFI names are identical across all
-  three features; only the linked implementation differs (verify with
-  `cargo tree -p seq-bridge --no-default-features --features backend-eql`).
+  crate); the `backend-eql` decoder edge links only `seq-backend-eql`, calling
+  its `parse_*` functions directly. The session path also links the neutral
+  `seq-events`, `seq-protocol-data`, and EQL-only `seq-session` features, but
+  it has no `seq-decode` or `seq-backend-live` edge. The `decode_*` FFI names
+  are identical across all three features; only the linked implementation
+  differs (verify with `cargo tree -p seq-bridge --no-default-features
+  --features backend-eql`).
 - **`seq-events`** + **`seq-backend-live`** + **`seq-backend-eql`** form the
   neutral contract consumed by scry's Elixir NIF (`scry`'s
   `native/scry_nif`, a separate crate in the `scry` repo that path-deps on
@@ -49,6 +51,44 @@ entirely) for the C++ daemon, while it also implements the neutral
 `Backend` trait (via its `seq-events` dependency) for the Elixir NIF. Both
 call paths land on the exact same parser code, which is the whole point:
 one eql decode implementation, not two.
+
+## Stateful session path
+
+`seq-protocol-data` embeds the mapped Live, Test, and EQL opcode catalogs. A
+lookup always specifies `BackendId` and `StreamKind`, because world and zone
+IDs can collide. Runtime reload parses and validates a complete backend file
+before swapping it into `ProtocolRegistry`; a failed read or parse leaves the
+previous generation active.
+
+`seq-session` is the new host entry point. It accepts numeric opcodes, records
+the protocol generation on every `DecodeBatch`, dispatches to the immutable
+backend selected at construction, and owns EQL self and loot trackers. It also
+turns backend wire events into player-family events. `PlayerMoved`, partial
+`PlayerVitalsUpdated`, `PlayerDied`, and the player identity and appearance
+events are final meanings. Other entities use `SpawnHealthUpdated`,
+`SpawnIdentityUpdated`, and `SpawnDied`. Zero-valued killer ids become absent
+values, and an unresolved player spawn id stays absent. The
+existing name-based `Backend::decode`, opcode-specific C++ bridge, and public
+standalone tracker APIs remain intact during shadow migration.
+
+For C++, `seq-bridge` exposes `SessionProtocolRegistry` and `SessionResource`
+as opaque cxx resources. `SessionDecodeBatch.events` contains ordered
+`{SessionEventKind, payload_index}` references. Each Event payload has a typed
+vector in the same batch. C++ switches on the tag, indexes the matching vector,
+and constructs its `std::variant`; it never interprets a map or opcode name.
+`self_stats` and `loot_rows` carry the phase-2 EQL shadow correlator output.
+
+Lifecycle events add their state boundary to the same ordered batch. A
+`SessionReset` precedes `EnterWorld`, `PlayerProfile`, or a confirmed Live/Test
+`ZoneTransition`. `ZoneChanged` precedes `ZoneEnvironmentChanged` for one
+`OP_NewZone`. Parsers validate lifecycle direction, payload size, names, time
+ranges, and finite environment values before the session changes correlation
+state.
+
+The checked-in protocol TOML contains only stream, ID, and opcode name. See
+[`seq-protocol-data/README.md`](../seq-protocol-data/README.md) for the
+deterministic transitional drift check against scry-cpp. Host payload typename
+and size gates are not copied into Rust protocol data.
 
 ## Backend isolation: why eql is a clean break
 
@@ -151,8 +191,8 @@ offset parser in `seq-backend-eql` is the fallback, not the starting point.
 
 ## Self-identity tracking (`seq-backend-eql::SelfTracker`)
 
-Self-identity has THREE tiers, and only `SelfTracker` (`self_track.rs`) may
-rank them — hosts apply its verdicts, they never decide:
+Self-identity has three tiers, and only `SelfTracker` (`self_track.rs`) ranks
+them. `seq-session` applies its verdicts. Hosts receive final player events.
 
 1. **`observe_spawn`** — a name-match on a self-named `OP_ZoneEntry` is
    authoritative and adopts the LIVE copy.
@@ -162,17 +202,45 @@ rank them — hosts apply its verdicts, they never decide:
 3. A wide stat-sync carrying mana or endurance, which ride that channel for
    the player ONLY.
 
-Tiers 2–3 adopt *provisionally* and exist for one case: a host attaching
-MID-SESSION sees no `OP_PlayerProfile` and no ZoneEntry burst, so tier 1 can
-never fire and the player is invisible — no dot, no spawn row, no stat
-attribution — until they zone. A provisional id is the phantom twin's, so
-it must never displace a name match; when one lands, the tracker hands the
-superseded id back via `take_retired_provisional()` and the host drops
-whatever it synthesised for it. Tier 2 is the one that carries coordinates,
-so it's the only one that asks a host to synthesise a record; tier 3 is
-attribution only (it makes vitals land while the player stands still).
-`Event::SelfPos` carries `spawn_id` for exactly this — don't pin a player to
-it directly.
+Tiers 2 and 3 are provisional and handle mid-session attachment, where no
+profile or zone-entry burst was observed. A provisional id is the phantom
+twin's and never displaces a name match. The session reports the position as
+`PlayerMoved { spawn_id: None, ... }` until it resolves the real moving id. It
+does not create a synthetic spawn. Wide vitals received before the twin record
+are held and emitted once the tracker confirms ownership. Zone boundaries and
+player death clear every provisional and twin id.
+
+## Entity identity and spatial state
+
+The Rust session keeps a small entity-name index for `OP_SpawnRename`. A rename
+gets a spawn id only when exactly one active spawn has the old name. Attachments
+that start mid-zone and duplicate names produce `id: None`; they never invent a
+sentinel id. Lifecycle resets clear the index before later events in the batch.
+
+Doors and ground items keep their server ids in separate namespaces. The shared
+events do not offset those ids or represent either object as a spawn. Door
+`zonePoint == 0xffff_ffff` becomes `None`. Door, ground-item, corpse, and
+zone-point coordinates stay as finite `f32` values. Modern Test zone points
+retain their portal/object actor name and leave the absent trigger and
+destination ids as `None`. Host projectors own any rounding, name resolution,
+and synthetic ids required by seq.v1 compatibility.
+
+Live ground items retain the full actor-definition string and their wire
+heading. EQL ground records carry no heading, so the event uses `None` rather
+than fabricating zero. A fixed-width host buffer owns its own truncation.
+
+Entity motion follows the same rule. `SpawnMoved` carries optional velocity
+components, heading delta, and animation in addition to its required absolute
+position. The compact movement wire may omit each of those facts. Live
+`SpawnAdded` also carries its decoded initial position, motion, and nine visual
+equipment model ids. EQL leaves motion and equipment absent until its wire
+layout is validated. Hosts may project absent values as zero for an older
+public contract, but zero and absent remain distinct in the shared event.
+
+`OP_CorpseLocResponse` has an old PC-coordinate quirk. When the session knows
+the entity is a player or player corpse, it swaps the two horizontal wire fields
+before emitting `CorpseLocated`. Unknown mid-session corpses retain the parser's
+map-frame reading rather than disappearing.
 
 ## Why quality gates are per-backend, not workspace-wide
 

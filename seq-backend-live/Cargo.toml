@@ -7,12 +7,17 @@ license.workspace = true
 authors.workspace = true
 rust-version.workspace = true
 
+[features]
+default = ["backend-live"]
+backend-live = ["seq-decode/backend-live"]
+backend-test = ["seq-decode/backend-test"]
+
 [dependencies]
 seq-events = { workspace = true }
 # Live struct set + shared parsers. seq-decode's workspace dep is
 # default-features = false, so pick the backend explicitly (it compile_errors
 # without exactly one). Test would swap this for backend-test in a sibling crate.
-seq-decode = { workspace = true, features = ["backend-live"] }
+seq-decode = { workspace = true, default-features = false }
 
 [lints]
 workspace = true

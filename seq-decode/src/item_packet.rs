@@ -42,6 +42,9 @@ pub struct LiveItem {
     pub lore_name: String,
     pub item_id: u32,
     pub weight: f32,
+    /// Exact integer value carried by the wire. `weight` remains for the
+    /// opcode-specific compatibility API.
+    pub weight_tenths: u32,
     pub flags: u32,
     pub slot_mask: u32,
     pub resists: Vec<i32>,
@@ -112,6 +115,7 @@ pub fn parse_item_packet(b: &[u8]) -> Result<LiveItem, ItemPacketError> {
         lore_name: latin1(&b[lore_start..second_nul]),
         item_id: u32_at(p, 8),
         weight: u32_at(p, 12) as f32 / 10.0,
+        weight_tenths: u32_at(p, 12),
         flags: u32_at(p, 16),
         slot_mask: u32_at(p, 20),
         resists: (0..RESIST_COUNT).map(|i| p[34 + i] as i8 as i32).collect(),
@@ -173,6 +177,7 @@ mod tests {
         assert_eq!(it.lore_name, "A lantern");
         assert_eq!(it.item_id, 9979);
         assert_eq!(it.weight, 0.5);
+        assert_eq!(it.weight_tenths, 5);
         assert_eq!(it.slot_mask, 18432);
         assert_eq!(it.stats[0], 3);
         assert_eq!(it.ac, 11);

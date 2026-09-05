@@ -1,0 +1,327 @@
+# Canonical Rust opcode lookup data.
+# Rust is authoritative; host mirrors are checked or generated from this file.
+# Payload typename and size gates intentionally stay in the host.
+
+[[world]]
+id = "08d0"
+name = "OP_CharacterCreate"
+
+[[world]]
+id = "0935"
+name = "OP_EnterWorld"
+
+[[world]]
+id = "204f"
+name = "OP_SendLoginInfo"
+
+[[world]]
+id = "289c"
+name = "OP_SendBaseDataChecksum"
+
+[[world]]
+id = "2de1"
+name = "OP_SendSpellChecksum"
+
+[[world]]
+id = "2ecf"
+name = "OP_ZoneServerInfo"
+
+[[world]]
+id = "2efb"
+name = "OP_GuildList"
+
+[[world]]
+id = "44d9"
+name = "OP_SendExeChecksum"
+
+[[world]]
+id = "48f9"
+name = "OP_DeleteCharacter"
+
+[[world]]
+id = "6bcf"
+name = "OP_ExpansionInfo"
+
+[[world]]
+id = "7fc9"
+name = "OP_SendCharInfo"
+
+[[world]]
+id = "8eaa"
+name = "OP_SetChatServer"
+
+[[world]]
+id = "a24a"
+name = "OP_ApproveName"
+
+[[world]]
+id = "a958"
+name = "OP_SendSkillCapsChecksum"
+
+[[world]]
+id = "b537"
+name = "OP_LogServer"
+
+[[world]]
+id = "b8cc"
+name = "OP_ApproveWorld"
+
+[[world]]
+id = "f22b"
+name = "OP_SetChatServer2"
+
+[[world]]
+id = "f8e0"
+name = "OP_MOTD"
+
+[[world]]
+id = "fc46"
+name = "OP_WorldComplete"
+
+[[zone]]
+id = "0368"
+name = "OP_ZoneEntry"
+
+[[zone]]
+id = "06ae"
+name = "OP_Logout"
+
+[[zone]]
+id = "0857"
+name = "OP_Death"
+
+[[zone]]
+id = "0a09"
+name = "OP_PetButtons"
+
+[[zone]]
+id = "0c1d"
+name = "OP_MoneyUpdate"
+
+[[zone]]
+id = "0f48"
+name = "OP_NewGuildInZone"
+
+[[zone]]
+id = "0ff3"
+name = "OP_PetTarget"
+
+[[zone]]
+id = "10ad"
+name = "OP_ClickObject"
+
+[[zone]]
+id = "1223"
+name = "OP_LootDrops"
+
+[[zone]]
+id = "1343"
+name = "OP_PetBuffList"
+
+[[zone]]
+id = "14fa"
+name = "OP_BeginCast"
+
+[[zone]]
+id = "150a"
+name = "OP_AAExpUpdate"
+
+[[zone]]
+id = "1833"
+name = "OP_DeleteSpawn"
+
+[[zone]]
+id = "1c18"
+name = "OP_ClientUpdate"
+
+[[zone]]
+id = "1fd2"
+name = "OP_WearChange"
+
+[[zone]]
+id = "206a"
+name = "OP_PlayerProfile"
+
+[[zone]]
+id = "23be"
+name = "OP_SkillUpdate"
+
+[[zone]]
+id = "27e5"
+name = "OP_SendAATable"
+
+[[zone]]
+id = "281e"
+name = "OP_GroupUpdate"
+
+[[zone]]
+id = "29c0"
+name = "OP_GuildMemberUpdate"
+
+[[zone]]
+id = "2b52"
+name = "OP_SpawnDoor"
+
+[[zone]]
+id = "2c60"
+name = "OP_Action"
+
+[[zone]]
+id = "2cb1"
+name = "OP_SpawnAppearance"
+
+[[zone]]
+id = "2cee"
+name = "OP_HPUpdate"
+
+[[zone]]
+id = "2d83"
+name = "OP_Buff"
+
+[[zone]]
+id = "2dda"
+name = "OP_MobUpdate"
+
+[[zone]]
+id = "2e74"
+name = "OP_TimeOfDay"
+
+[[zone]]
+id = "2f21"
+name = "OP_ClickBuffOff"
+
+[[zone]]
+id = "332d"
+name = "OP_ManaChange"
+
+[[zone]]
+id = "336e"
+name = "OP_SelfPos"
+
+[[zone]]
+id = "3691"
+name = "OP_GuildMemberList"
+
+[[zone]]
+id = "36c2"
+name = "OP_Find"
+
+[[zone]]
+id = "377e"
+name = "OP_BuffList"
+
+[[zone]]
+id = "3b5a"
+name = "OP_LootMessage"
+
+[[zone]]
+id = "3f4b"
+name = "OP_GroupCancelInvite"
+
+[[zone]]
+id = "3f84"
+name = "OP_LootTransaction"
+
+[[zone]]
+id = "4085"
+name = "OP_Emote"
+
+[[zone]]
+id = "40fb"
+name = "OP_SendZonePoints"
+
+[[zone]]
+id = "4155"
+name = "OP_GroupDisband"
+
+[[zone]]
+id = "417a"
+name = "OP_Illusion"
+
+[[zone]]
+id = "4448"
+name = "OP_PetCommands"
+
+[[zone]]
+id = "4671"
+name = "OP_ExpUpdate"
+
+[[zone]]
+id = "4911"
+name = "OP_RemoveSpawn"
+
+[[zone]]
+id = "4a41"
+name = "OP_CommonMessage"
+
+[[zone]]
+id = "4dbe"
+name = "OP_GroundSpawn"
+
+[[zone]]
+id = "514a"
+name = "OP_NewZone"
+
+[[zone]]
+id = "52ef"
+name = "OP_NpcMoveUpdate"
+
+[[zone]]
+id = "595f"
+name = "OP_GuildsInZoneList"
+
+[[zone]]
+id = "59a8"
+name = "OP_SimpleMessage"
+
+[[zone]]
+id = "5f44"
+name = "OP_CastSpell"
+
+[[zone]]
+id = "6004"
+name = "OP_UpdateAA"
+
+[[zone]]
+id = "6492"
+name = "OP_LoadoutSwap"
+
+[[zone]]
+id = "64c3"
+name = "OP_LevelUpdate"
+
+[[zone]]
+id = "65c4"
+name = "OP_SpecialMesg"
+
+[[zone]]
+id = "677b"
+name = "OP_FormattedMessage"
+
+[[zone]]
+id = "6aa2"
+name = "OP_GroupInvite"
+
+[[zone]]
+id = "6bc9"
+name = "OP_GuildMOTD"
+
+[[zone]]
+id = "70a1"
+name = "OP_Action2"
+
+[[zone]]
+id = "7560"
+name = "OP_ZoneChange"
+
+[[zone]]
+id = "756d"
+name = "OP_Consider"
+
+[[zone]]
+id = "7e22"
+name = "OP_TargetMouse"
+
+[[zone]]
+id = "90e4"
+name = "OP_SwapSpell"

@@ -1,0 +1,17 @@
+[package]
+name = "seq-protocol-data"
+description = "Canonical embedded and reloadable opcode catalogs for Live, Test, and EQL"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+serde.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+toml.workspace = true
+
+[lints]
+workspace = true
